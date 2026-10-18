@@ -347,6 +347,17 @@ class Window(Adw.ApplicationWindow):
         self.show_krosshair()
         page.add(cross)
 
+        game = Adw.PreferencesGroup(title="Game")
+        self.autoexec_row = Adw.SwitchRow(
+            title="Load from autoexec.cfg",
+            subtitle="Adds exec yaws.cfg to your autoexec.cfg, so the game loads your "
+                     "yawspeed binds when it starts")
+        self.autoexec_row.set_active(bool(self.cstrike) and core.autoexec_runs_yaws(self.cstrike))
+        self.autoexec_row.set_sensitive(bool(self.cstrike))
+        self.autoexec_row.connect("notify::active", self.toggle_autoexec)
+        game.add(self.autoexec_row)
+        page.add(game)
+
         steam = Adw.PreferencesGroup(
             title="Steam launch options",
             description="CS:S Properties → Launch Options. css-yaw-run applies these "
@@ -445,6 +456,20 @@ class Window(Adw.ApplicationWindow):
         for row in self.rows:
             row.update_preview()
         self.changed()
+
+    def toggle_autoexec(self, row, _):
+        on = row.get_active()
+        try:
+            core.set_autoexec(self.cstrike, on)
+        except OSError as e:
+            self.toasts.add_toast(Adw.Toast(title=f"Couldn't change autoexec.cfg: {e.strerror}",
+                                            timeout=5))
+            row.handler_block_by_func(self.toggle_autoexec)
+            row.set_active(not on)
+            row.handler_unblock_by_func(self.toggle_autoexec)
+            return
+        self.toasts.add_toast(Adw.Toast(
+            title="Added to autoexec.cfg" if on else "Removed from autoexec.cfg", timeout=3))
 
     def show_krosshair(self):
         manifest = core.krosshair_installed()

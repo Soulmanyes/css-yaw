@@ -23,8 +23,8 @@ active from a sound and from your crosshair colour. Made for surf on Linux.
 
 Then:
 
-1. Make sure your `autoexec.cfg` has the line `exec yaws.cfg`.
-2. Open **CS:S Yaw**, pick your key, yawspeeds, colours and sounds, and press **Apply**.
+1. Open **CS:S Yaw**, pick your key, yawspeeds, colours and sounds, and press **Apply**.
+2. Turn on **Load from autoexec.cfg**, or add `exec yaws.cfg` to your `autoexec.cfg` yourself.
 3. Add `css-yaw-run` right before `%command%` in the CS:S launch options. The app shows
    your current launch options with it added, ready to copy. With no other options:
 

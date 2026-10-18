@@ -345,6 +345,51 @@ def yaws_cfg(data, unbind=()):
     return "\n".join(lines) + "\n"
 
 
+# a line that runs yaws.cfg, e.g. `exec yaws`, `exec "yaws.cfg"  // comment`
+_EXEC_YAWS = re.compile(r'^\s*exec\s+"?yaws(\.cfg)?"?\s*(//.*)?$', re.IGNORECASE)
+_AUTOEXEC_COMMENT = "// added by CS:S Yaw"
+
+
+def autoexec_runs_yaws(cstrike):
+    try:
+        lines = (cstrike / "cfg/autoexec.cfg").read_text(errors="replace").splitlines()
+    except OSError:
+        return False
+    return any(_EXEC_YAWS.match(line) for line in lines)
+
+
+def set_autoexec(cstrike, on):
+    """Adds or removes `exec yaws.cfg` in autoexec.cfg. Backs the file up the first time."""
+    path = cstrike / "cfg/autoexec.cfg"
+    try:
+        text = path.read_text(errors="replace")
+    except FileNotFoundError:
+        text = ""
+    backup = path.with_name("autoexec.cfg.bak-css-yaw")
+    if text and not backup.exists():
+        shutil.copyfile(path, backup)
+    lines = text.splitlines()
+    if on:
+        if any(_EXEC_YAWS.match(line) for line in lines):
+            return
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines += [_AUTOEXEC_COMMENT, "exec yaws.cfg"]
+    else:
+        keep = []
+        for line in lines:
+            if _EXEC_YAWS.match(line):
+                # drop our comment above it too
+                if keep and keep[-1].strip() == _AUTOEXEC_COMMENT:
+                    keep.pop()
+                continue
+            keep.append(line)
+        while keep and not keep[-1].strip():
+            keep.pop()
+        lines = keep
+    write_text_atomic(path, "\n".join(lines) + "\n")
+
+
 def write_text_atomic(path, text):
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text)
