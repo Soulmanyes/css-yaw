@@ -7,6 +7,8 @@ active from a sound and from your crosshair colour. Made for surf on Linux.
 - **Crosshair colour:** a [KROSSHAIR](https://github.com/noahlyk/krosshair) crosshair
   changes colour for each yawspeed.
 
+![CS:S Yaw settings window](docs/screenshot.png)
+
 ## What you need
 
 - Linux, and the native Linux version of CS:S on Steam. Steam from your distro's packages
