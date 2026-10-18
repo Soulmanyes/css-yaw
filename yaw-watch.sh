@@ -20,9 +20,16 @@ trap 'kill "$TAIL" 2>/dev/null; exit 0' TERM INT HUP
 exec {LOGFD}< <(tail -n0 -F "$LOG" 2>/dev/null)
 TAIL=$!
 while IFS= read -r line <&"$LOGFD"; do
-    # echo leaves a trailing space (and maybe \r); strip all whitespace
-    line=${line//[[:space:]]/}
-    # whole-line match so chat containing "YAW_210" does not trigger it
-    [[ $line =~ ^YAW_[0-9.]+$ ]] || continue
-    [ -f "$IMG/$line.png" ] && set_img "$IMG/$line.png"
+    [[ $line == *YAW_* ]] || continue
+    # chat looks like "Name :  text"; ignore what players type
+    line=${line%% : *}
+    # The console sometimes runs lines together ("YAW_60 YAW_90", "YAW_60 [Timer] ..."),
+    # so take the last YAW_<speed> word in the line, not only whole-line matches.
+    last=
+    rest=$line
+    while [[ $rest =~ (^|[^A-Za-z0-9_])(YAW_[0-9]+(\.[0-9]+)?)([^0-9A-Za-z_.]|$) ]]; do
+        last=${BASH_REMATCH[2]}
+        rest=${rest#*"$last"}
+    done
+    [ -n "$last" ] && [ -f "$IMG/$last.png" ] && set_img "$IMG/$last.png"
 done
