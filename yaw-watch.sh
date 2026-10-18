@@ -2,10 +2,10 @@
 # Swaps the crosshair when the CS:S yaw_cycle bind echoes "YAW_<speed>".
 # yaw-run starts the game with KROSSHAIR_IMG pointing at current.png, and
 # KROSSHAIR reloads that file whenever its mtime changes.
-CFG="${XDG_CONFIG_HOME:-$HOME/.config}/css-yaw"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/sourceyaw"
 IMG="$CFG/crosshairs"
 CUR="$CFG/current.png"
-: "${LOG:?LOG not set; open CS:S Yaw and press Apply}"
+: "${LOG:?LOG not set; open Source Yaw and press Apply}"
 
 set_img() {
     # copy then rename, so the layer never reads a half-written PNG

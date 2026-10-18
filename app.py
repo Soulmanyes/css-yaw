@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CS:S Yaw: pick the cl_yawspeed cycle key, the yawspeeds and their crosshair colours."""
+"""Source Yaw: pick the cl_yawspeed cycle key, the yawspeeds and their crosshair colours."""
 
 import io
 import os
@@ -15,7 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import yawcore as core  # noqa: E402
 
-APP_ID = "io.github.soulmanyes.CssYaw"
+APP_ID = "io.github.soulmanyes.SourceYaw"
 
 # GDK key names -> Source bind names, for keys whose names differ
 GDK_TO_SOURCE = {
@@ -260,7 +260,7 @@ class EntryRow(Adw.ActionRow):
         self.window = window
 
         # drag the handle onto another row to take its place in the cycle
-        handle = Gtk.Image(icon_name="css-yaw-drag-handle-symbolic", tooltip_text="Drag to reorder")
+        handle = Gtk.Image(icon_name="sourceyaw-drag-handle-symbolic", tooltip_text="Drag to reorder")
         handle.set_cursor(Gdk.Cursor.new_from_name("grab"))
         drag = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
         drag.connect("prepare", self.drag_prepare)
@@ -407,7 +407,7 @@ class EntryRow(Adw.ActionRow):
 
 class Window(Adw.ApplicationWindow):
     def __init__(self, app, game=None):
-        super().__init__(application=app, title="CS:S Yaw")
+        super().__init__(application=app, title="Source Yaw")
         self.set_default_size(620, 640)
         installed = core.installed_games()
         if game is None:
@@ -429,7 +429,7 @@ class Window(Adw.ApplicationWindow):
         self.toasts = Adw.ToastOverlay()
         header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle(
-            title="CS:S Yaw", subtitle=f"{self.info['name']} · Version {core.VERSION}")
+            title="Source Yaw", subtitle=f"{self.info['name']} · Version {core.VERSION}")
         header.set_title_widget(self.title_widget)
         self.apply_btn = Gtk.Button(label="Apply")
         self.apply_btn.add_css_class("suggested-action")
@@ -522,7 +522,7 @@ class Window(Adw.ApplicationWindow):
     def add_steam_group(self, page):
         steam = Adw.PreferencesGroup(
             title="Steam launch options",
-            description="CS:S Properties → Launch Options. css-yaw-run applies these "
+            description="CS:S Properties → Launch Options. sourceyaw-run applies these "
                         "settings and runs the colour changer while the game is open.")
         refresh = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
                              tooltip_text="Read the launch options from Steam again")
@@ -545,7 +545,7 @@ class Window(Adw.ApplicationWindow):
     def check_setup(self):
         problem = None
         if not self.cstrike and core.flatpak_steam_only(self.game):
-            problem = ("Flatpak Steam isn't supported: css-yaw-run can't run inside "
+            problem = ("Flatpak Steam isn't supported: sourceyaw-run can't run inside "
                        "its sandbox. Use Steam from your distro's packages")
         elif not self.cstrike:
             problem = f"{self.info['name']} not found in your Steam libraries"
@@ -670,7 +670,7 @@ class Window(Adw.ApplicationWindow):
 
     def set_dirty(self, dirty):
         self.dirty = dirty
-        title = "CS:S Yaw" + (" •" if dirty else "")
+        title = "Source Yaw" + (" •" if dirty else "")
         self.set_title(title)
         self.title_widget.set_title(title)
 
@@ -764,15 +764,15 @@ class Window(Adw.ApplicationWindow):
         self.launch_option, already = core.launch_option(current, run)
         self.launch_row.set_title(GLib.markup_escape_text(self.launch_option))
         if current is None:
-            note = "Couldn't read your Steam launch options. Put css-yaw-run before %command%"
+            note = "Couldn't read your Steam launch options. Put sourceyaw-run before %command%"
         elif already:
             note = "Already set up"
         elif current:
-            note = "Your current launch options with css-yaw-run added. Replace them with this"
+            note = "Your current launch options with sourceyaw-run added. Replace them with this"
         else:
             note = "You have no launch options yet. Paste this in"
         if run != core.RUNNER:
-            note += ". Steam can't find css-yaw-run by name here, so this uses the full path"
+            note += ". Steam can't find sourceyaw-run by name here, so this uses the full path"
         self.launch_row.set_subtitle(note)
 
     def copy(self, text):
@@ -790,6 +790,7 @@ class App(Adw.Application):
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
             os.path.join(os.path.dirname(os.path.realpath(__file__)), "icons"))
         Gtk.Window.set_default_icon_name(APP_ID)
+        core.migrate_old_name()
         win = self.get_active_window() or Window(self)
         win.present()
 

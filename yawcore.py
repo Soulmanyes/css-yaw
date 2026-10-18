@@ -9,7 +9,7 @@ For CS:S the pieces fit together like this:
     key sets the next cl_yawspeed, plays its sound and echoes YAW_<speed>.
   - `con_logfile yaw.log` copies the console into cstrike/yaw.log.
   - yaw-watch.sh tails that log and copies crosshairs/YAW_<speed>.png over
-    ~/.config/css-yaw/current.png. The game runs with KROSSHAIR_IMG pointing at
+    ~/.config/sourceyaw/current.png. The game runs with KROSSHAIR_IMG pointing at
     that file, and the KROSSHAIR Vulkan layer reloads it inside the game's own
     frames (no compositor overlay, so no stutter).
   - yaw-run is the Steam launch option wrapper: it runs `yawcore.py --apply`,
@@ -33,12 +33,14 @@ from pathlib import Path
 
 from PIL import Image
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 HOME = Path.home()
 XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
 XDG_DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
-CONFIG_DIR = XDG_CONFIG / "css-yaw"
+CONFIG_DIR = XDG_CONFIG / "sourceyaw"
+# the app was called CS:S Yaw before 1.2.0; its folders and markers are still recognised
+OLD_CONFIG_DIR = XDG_CONFIG / "css-yaw"
 SETTINGS = CONFIG_DIR / "settings.json"
 CROSSHAIRS = CONFIG_DIR / "crosshairs"
 # what the game shows: yaw-run passes it to KROSSHAIR as KROSSHAIR_IMG
@@ -46,7 +48,8 @@ CURRENT = CONFIG_DIR / "current.png"
 BUILTIN = CONFIG_DIR / "plain-cross.png"
 WATCH_ENV = CONFIG_DIR / "watch.env"
 # install.sh links yaw-run into ~/.local/bin under this name
-RUNNER = "css-yaw-run"
+RUNNER = "sourceyaw-run"
+OLD_RUNNER = "css-yaw-run"  # install.sh keeps it as an alias, so old launch options work
 BIN_DIR = HOME / ".local/bin"
 
 CM_DIR = XDG_CONFIG / "crosshair-maker"
@@ -58,8 +61,8 @@ KROSSHAIR_URL = ("https://github.com/noahlyk/krosshair/releases/download/"
 KROSSHAIR_SHA256 = "4f3c8258eb1abb6b6e4b15c55afddbba09296736473206c281e194f094617eef"
 KROSSHAIR_LAYER = "VK_LAYER_KROSSHAIR_overlay"
 # our own copy lives here; install.sh --uninstall removes both
-KROSSHAIR_DIR = XDG_DATA / "css-yaw/krosshair"
-KROSSHAIR_JSON = XDG_DATA / "vulkan/implicit_layer.d/css-yaw-krosshair.json"
+KROSSHAIR_DIR = XDG_DATA / "sourceyaw/krosshair"
+KROSSHAIR_JSON = XDG_DATA / "vulkan/implicit_layer.d/sourceyaw-krosshair.json"
 
 # colors: "krosshair" = KROSSHAIR image swapped by the watcher (CS:S has no crosshair
 # without a weapon); "cvar" = the game's own cl_crosshair_color, set from yaws.cfg.
@@ -74,10 +77,13 @@ GAMES = {
                  "folders": ["Momentum Mod Playtest", "Momentum Mod"], "colors": "cvar",
                  "process": "momentum", "sound_vpks": ["mount/hl2_dir.vpk"]},
 }
-# Flatpak Steam keeps its libraries here; css-yaw-run can't run inside its sandbox
+# Flatpak Steam keeps its libraries here; sourceyaw-run can't run inside its sandbox
 FLATPAK_STEAM = HOME / ".var/app/com.valvesoftware.Steam"
 # first line of every yaws.cfg the app writes; anything else is the user's own file
-YAWS_HEADER = "// Written by CS:S Yaw."
+YAWS_HEADER = "// Written by Source Yaw."
+YAWS_HEADERS = (YAWS_HEADER, "// Written by CS:S Yaw.")
+BACKUP = ".bak-sourceyaw"
+BACKUPS = (BACKUP, ".bak-css-yaw")
 # Momentum: one small cfg per yawspeed that sets the crosshair colour (an alias
 # can't hold the quotes cl_crosshair_color "R G B A" needs, but a cfg can)
 COLOR_DIR = "yaws_colors"
@@ -298,6 +304,12 @@ def install_krosshair(tarball=None):
 
 # ---------------------------------------------------------------- settings
 
+def migrate_old_name():
+    """Moves ~/.config/css-yaw (from before the rename) to ~/.config/sourceyaw."""
+    if OLD_CONFIG_DIR.is_dir() and not CONFIG_DIR.exists():
+        OLD_CONFIG_DIR.rename(CONFIG_DIR)
+
+
 def _read_settings_file():
     """{"game": last used, "profiles": {game: settings}}. Before Momentum support the
     file held just the CS:S settings, which become the CS:S profile."""
@@ -499,7 +511,8 @@ def yaws_cfg(data, unbind=(), game="css"):
 
 # a line that runs yaws.cfg, e.g. `exec yaws`, `exec "yaws.cfg"  // comment`
 _EXEC_YAWS = re.compile(r'^\s*exec\s+"?yaws(\.cfg)?"?\s*(//.*)?$', re.IGNORECASE)
-_AUTOEXEC_COMMENT = "// added by CS:S Yaw"
+_AUTOEXEC_COMMENT = "// added by Source Yaw"
+_AUTOEXEC_COMMENTS = (_AUTOEXEC_COMMENT, "// added by CS:S Yaw")
 
 
 def autoexec_runs_yaws(cstrike):
@@ -517,8 +530,8 @@ def set_autoexec(cstrike, on):
         text = path.read_text(errors="replace")
     except FileNotFoundError:
         text = ""
-    backup = path.with_name("autoexec.cfg.bak-css-yaw")
-    if text and not backup.exists():
+    backup = path.with_name("autoexec.cfg" + BACKUP)
+    if text and not any(path.with_name("autoexec.cfg" + b).exists() for b in BACKUPS):
         shutil.copyfile(path, backup)
     lines = text.splitlines()
     if on:
@@ -532,7 +545,7 @@ def set_autoexec(cstrike, on):
         for line in lines:
             if _EXEC_YAWS.match(line):
                 # drop our comment above it too
-                if keep and keep[-1].strip() == _AUTOEXEC_COMMENT:
+                if keep and keep[-1].strip() in _AUTOEXEC_COMMENTS:
                     keep.pop()
                 continue
             keep.append(line)
@@ -612,14 +625,14 @@ def apply(data, cstrike, reset_current=False, game="css"):
         notes.append(f"'{key}' gets unbound next time yaws.cfg runs")
     target = cstrike / "cfg/yaws.cfg"
     try:
-        theirs = not target.read_text(errors="replace").startswith(YAWS_HEADER)
+        theirs = not target.read_text(errors="replace").startswith(YAWS_HEADERS)
     except FileNotFoundError:
         theirs = False
-    backup = target.with_name("yaws.cfg.bak-css-yaw")
-    if theirs and not backup.exists():
+    backup = target.with_name("yaws.cfg" + BACKUP)
+    if theirs and not any(target.with_name("yaws.cfg" + b).exists() for b in BACKUPS):
         # someone's own yaws.cfg: keep it rather than silently replace it
         shutil.copyfile(target, backup)
-        notes.append("Your old yaws.cfg was saved as yaws.cfg.bak-css-yaw")
+        notes.append(f"Your old yaws.cfg was saved as {backup.name}")
     write_text_atomic(target, yaws_cfg(data, unbind, game))
     if GAMES[game]["colors"] == "krosshair":
         write_crosshairs(data, reset_current)
@@ -647,19 +660,20 @@ def remove_from_game(cstrike, game="css"):
             if note:
                 print(note)
     target = cstrike / "cfg/yaws.cfg"
-    backup = target.with_name("yaws.cfg.bak-css-yaw")
     try:
-        if target.read_text(errors="replace").startswith(YAWS_HEADER):
+        if target.read_text(errors="replace").startswith(YAWS_HEADERS):
             target.unlink()
     except FileNotFoundError:
         pass
-    if backup.exists() and not target.exists():
-        backup.replace(target)
+    for suffix in BACKUPS:
+        backup = target.with_name("yaws.cfg" + suffix)
+        if backup.exists() and not target.exists():
+            backup.replace(target)
 
 
 # ---------------------------------------------------------------- sound preview
 
-SOUND_CACHE = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "css-yaw/sounds"
+SOUND_CACHE = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "sourceyaw/sounds"
 _vpk_trees = {}
 
 
@@ -830,9 +844,14 @@ def launch_option(current=None, run=None):
     """The full launch options with the wrapper added, and whether it was there already."""
     run = run or runner()
     current = (current or "").strip()
-    if re.search(r"(^|\s)\S*(css-yaw-run|yaw-run)(\s|$)", current):
-        # already there; make it the form that works here (short name or full path)
-        fixed = re.sub(r"(?<!\S)\S*(css-yaw-run|/yaw-run)(?=\s|$)", lambda _: run, current)
+    wrapper = r"(?<!\S)\S*(sourceyaw-run|css-yaw-run|/yaw-run)(?=\s|$)"
+    found = re.search(wrapper, current)
+    if found:
+        # already there. The old name still works (install.sh keeps it as an alias);
+        # otherwise make it the form that works here (short name or full path)
+        if found.group(0) == OLD_RUNNER and run == RUNNER:
+            return current, True
+        fixed = re.sub(wrapper, lambda _: run, current)
         return fixed, fixed == current
     if "%command%" in current:
         return current.replace("%command%", f"{run} %command%", 1), False
@@ -846,6 +865,7 @@ if __name__ == "__main__":
     #   settings, or CS:S on a fresh install, so a game is never set up behind your back)
     # `python3 yawcore.py --remove-from-game`: undo the game side (install.sh --uninstall)
     import sys
+    migrate_old_name()
     args = sys.argv[1:]
     if not args or args[0] not in ("--apply", "--remove-from-game") or len(args) > 2 \
             or (len(args) == 2 and args[1] not in GAMES):

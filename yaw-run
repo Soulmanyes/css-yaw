@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Steam launch option wrapper for CS:S Yaw. Put it right before %command%:
-#   css-yaw-run %command%   (install.sh links it into ~/.local/bin)
+# Steam launch option wrapper for Source Yaw. Put it right before %command%:
+#   sourceyaw-run %command%   (install.sh links it into ~/.local/bin; css-yaw-run,
+#   its name before 1.2.0, still works)
 # Rewrites yaws.cfg and the crosshair colours from the app's settings. For CS:S it
 # also swaps the crosshair colour while the game runs: it turns KROSSHAIR on for
 # the game and points it at our own image, so crosshair-maker's files are never
@@ -11,7 +12,10 @@ GAME_LIBS=${LD_LIBRARY_PATH-}
 unset LD_PRELOAD LD_LIBRARY_PATH
 
 DIR="$(dirname "$(readlink -f "$0")")"
-CFG="${XDG_CONFIG_HOME:-$HOME/.config}/css-yaw"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/sourceyaw"
+OLD_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/css-yaw"
+# settings from before the rename (done here because mkdir below would block it)
+[ -d "$OLD_CFG" ] && [ ! -e "$CFG" ] && mv "$OLD_CFG" "$CFG"
 RUNLOG="$CFG/run.log"
 mkdir -p "$CFG"
 
