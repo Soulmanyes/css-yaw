@@ -7,6 +7,8 @@ active from a sound and from your crosshair colour. Made for surf on Linux.
 - **Crosshair colour:** a [KROSSHAIR](https://github.com/noahlyk/krosshair) crosshair
   changes colour for each yawspeed.
 
+https://github.com/user-attachments/assets/40f99c9d-ba8a-4a52-8c9c-d5cf06575f16
+
 ![CS:S Yaw settings window](docs/screenshot.png)
 
 ## What you need
