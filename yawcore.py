@@ -68,12 +68,12 @@ KROSSHAIR_JSON = XDG_DATA / "vulkan/implicit_layer.d/sourceyaw-krosshair.json"
 # without a weapon); "cvar" = the game's own cl_crosshair_color, set from yaws.cfg.
 # sound_vpks are relative to the game's install folder.
 GAMES = {
-    "css": {"name": "Counter-Strike: Source", "appids": ["240"], "mod": "cstrike",
+    "css": {"name": "Counter-Strike: Source", "short": "CS:S", "appids": ["240"], "mod": "cstrike",
             "folders": ["Counter-Strike Source"], "colors": "krosshair",
             "process": "cstrike_linux64",
             "sound_vpks": ["cstrike/cstrike_pak_dir.vpk", "hl2/hl2_sound_misc_dir.vpk",
                            "hl2/hl2_misc_dir.vpk"]},
-    "momentum": {"name": "Momentum Mod", "appids": ["1802710"], "mod": "momentum",
+    "momentum": {"name": "Momentum Mod", "short": "Momentum Mod", "appids": ["1802710"], "mod": "momentum",
                  "folders": ["Momentum Mod Playtest", "Momentum Mod"], "colors": "cvar",
                  "process": "momentum", "sound_vpks": ["mount/hl2_dir.vpk"]},
 }

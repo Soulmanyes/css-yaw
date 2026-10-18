@@ -444,10 +444,26 @@ class Window(Adw.ApplicationWindow):
         game_group = Adw.PreferencesGroup(title="Game")
         if len(installed) > 1:
             self.game_ids = installed
-            self.game_row = Adw.ComboRow(title="Game", subtitle="Each game has its own settings")
-            self.game_row.set_model(Gtk.StringList.new([core.GAMES[g]["name"] for g in installed]))
-            self.game_row.set_selected(installed.index(game) if game in installed else 0)
-            self.game_row.connect("notify::selected", self.switch_game)
+            current = installed.index(game) if game in installed else 0
+            if len(installed) == 2:
+                # two games: a switch with one game on each side
+                self.game_row = Adw.ActionRow(title="Game",
+                                              subtitle="Each game has its own settings")
+                self.game_switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=current == 1)
+                sides = Gtk.Box(spacing=10, valign=Gtk.Align.CENTER)
+                sides.append(Gtk.Label(label=core.GAMES[installed[0]]["short"]))
+                sides.append(self.game_switch)
+                sides.append(Gtk.Label(label=core.GAMES[installed[1]]["short"]))
+                self.game_row.add_suffix(sides)
+                self.game_switch.connect("notify::active", self.switch_game)
+            else:
+                self.game_switch = None
+                self.game_row = Adw.ComboRow(title="Game",
+                                             subtitle="Each game has its own settings")
+                self.game_row.set_model(Gtk.StringList.new(
+                    [core.GAMES[g]["name"] for g in installed]))
+                self.game_row.set_selected(current)
+                self.game_row.connect("notify::selected", self.switch_game)
             game_group.add(self.game_row)
         self.autoexec_row = SwitchRow(
             title="Load from autoexec.cfg",
@@ -600,17 +616,22 @@ class Window(Adw.ApplicationWindow):
             row.update_preview()
         self.changed()
 
-    def switch_game(self, row, _):
-        game = self.game_ids[row.get_selected()]
+    def switch_game(self, widget, _):
+        index = int(widget.get_active()) if self.game_switch else widget.get_selected()
+        game = self.game_ids[index]
         if game == self.game:
             return
         if self.dirty:
             # each game has its own settings; don't drop unapplied changes silently
             self.toasts.add_toast(Adw.Toast(title="Apply your changes before switching game",
                                             timeout=4))
-            row.handler_block_by_func(self.switch_game)
-            row.set_selected(self.game_ids.index(self.game))
-            row.handler_unblock_by_func(self.switch_game)
+            widget.handler_block_by_func(self.switch_game)
+            back = self.game_ids.index(self.game)
+            if self.game_switch:
+                widget.set_active(bool(back))
+            else:
+                widget.set_selected(back)
+            widget.handler_unblock_by_func(self.switch_game)
             return
         core.set_last_game(game)
         Window(self.get_application(), game).present()
