@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Steam launch option wrapper for CS:S Yaw. Put it right before %command%:
+#   KROSSHAIR=1 css-yaw-run %command%   (install.sh links it into ~/.local/bin)
+# Rewrites yaws.cfg and the crosshair colours from the app's settings, swaps the
+# crosshair colour while the game runs, and restores your crosshair afterwards.
+# keep Steam's runtime libraries and overlay out of our own helpers; the game gets them back
+GAME_PRELOAD=${LD_PRELOAD-}
+GAME_LIBS=${LD_LIBRARY_PATH-}
+unset LD_PRELOAD LD_LIBRARY_PATH
+
+DIR="$(dirname "$(readlink -f "$0")")"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/css-yaw"
+RUNLOG="$CFG/run.log"
+mkdir -p "$CFG"
+
+{ date; python3 "$DIR/yawcore.py" --apply; } > "$RUNLOG" 2>&1
+# shellcheck source=/dev/null
+. "$CFG/watch.env" 2>/dev/null
+
+if [ "${COLORS:-0}" = 1 ] && [ -n "${LOG:-}" ]; then
+    # started directly (not via a function) so $! is the watcher itself
+    LOG="$LOG" "$DIR/yaw-watch.sh" >> "$RUNLOG" 2>&1 &
+    WATCHER=$!
+    trap 'kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null' EXIT
+    trap 'exit 143' TERM INT HUP
+fi
+
+LD_PRELOAD=$GAME_PRELOAD LD_LIBRARY_PATH=$GAME_LIBS "$@"
