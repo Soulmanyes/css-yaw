@@ -194,6 +194,31 @@ def pick_png(parent, title, folder, on_path):
     chooser.show()
 
 
+# the game switch picks one of two games, not on/off, so both sides look the same
+APP_CSS = """
+switch.game-switch:checked, switch.game-switch:checked:hover {
+    background-color: alpha(currentColor, 0.15);
+}
+switch.game-switch:checked > slider { background-color: white; }
+"""
+
+
+def load_app_css():
+    provider = Gtk.CssProvider()
+    try:
+        if hasattr(provider, "load_from_string"):  # GTK 4.12+
+            provider.load_from_string(APP_CSS)
+        else:
+            provider.load_from_data(APP_CSS.encode())
+    except (TypeError, GLib.Error):
+        try:
+            provider.load_from_data(APP_CSS, -1)  # signature on some older PyGObject
+        except (TypeError, GLib.Error):
+            return  # only looks: the switch keeps its normal colours
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+
 def texture_from_image(im, size):
     im = im.resize((size, size), resample=0)  # nearest: keep crosshair pixels sharp
     buf = io.BytesIO()
@@ -450,10 +475,15 @@ class Window(Adw.ApplicationWindow):
                 self.game_row = Adw.ActionRow(title="Game",
                                               subtitle="Each game has its own settings")
                 self.game_switch = Gtk.Switch(valign=Gtk.Align.CENTER, active=current == 1)
+                self.game_switch.add_css_class("game-switch")
                 sides = Gtk.Box(spacing=10, valign=Gtk.Align.CENTER)
-                sides.append(Gtk.Label(label=core.GAMES[installed[0]]["short"]))
-                sides.append(self.game_switch)
-                sides.append(Gtk.Label(label=core.GAMES[installed[1]]["short"]))
+                for i, side in enumerate(installed):
+                    label = Gtk.Label(label=core.GAMES[side]["short"])
+                    if i != current:
+                        label.add_css_class("dim-label")  # the side that isn't picked
+                    sides.append(label)
+                    if i == 0:
+                        sides.append(self.game_switch)
                 self.game_row.add_suffix(sides)
                 self.game_switch.connect("notify::active", self.switch_game)
             else:
@@ -811,6 +841,7 @@ class App(Adw.Application):
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
             os.path.join(os.path.dirname(os.path.realpath(__file__)), "icons"))
         Gtk.Window.set_default_icon_name(APP_ID)
+        load_app_css()
         core.migrate_old_name()
         win = self.get_active_window() or Window(self)
         win.present()
