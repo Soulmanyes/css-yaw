@@ -7,21 +7,31 @@
 set -eu
 
 NAME=css-yaw
+APP_ID=io.github.soulmanyes.CssYaw
 SRC=$(cd "$(dirname "$0")" && pwd)
 DEST=${XDG_DATA_HOME:-$HOME/.local/share}/$NAME
 APPS=${XDG_DATA_HOME:-$HOME/.local/share}/applications
 BIN=$HOME/.local/bin
+ICONS=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps
 UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user   # only to remove the old service
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 
 if [ "${1:-}" = "--uninstall" ]; then
     say "Removing CS:S Yaw"
+    if [ -t 0 ] && [ -f "$DEST/yawcore.py" ]; then
+        printf 'Also remove yaws.cfg and its line in autoexec.cfg from CS:S? [y/N] '
+        read -r answer
+        case $answer in
+            [yY]*) python3 "$DEST/yawcore.py" --remove-from-game && echo "Removed from CS:S." ;;
+        esac
+    fi
     # $DEST also holds KROSSHAIR if the app installed it; drop its layer manifest too,
     # or the Vulkan loader is left pointing at a missing library
-    rm -rf "$DEST" "$APPS/$NAME.desktop" "$BIN/$NAME" "$BIN/$NAME-run" \
+    rm -rf "$DEST" "$APPS/$NAME.desktop" "$APPS/$APP_ID.desktop" "$ICONS/$APP_ID.svg" \
+        "$BIN/$NAME" "$BIN/$NAME-run" \
         "${XDG_DATA_HOME:-$HOME/.local/share}/vulkan/implicit_layer.d/$NAME-krosshair.json"
-    say "Done. Your settings stay in ~/.config/$NAME and yaws.cfg stays in CS:S."
+    say "Done. Your settings stay in ~/.config/$NAME."
     echo "Remove $NAME-run from the CS:S launch options, or the game will not start."
     exit 0
 fi
@@ -64,21 +74,24 @@ if [ -e "$UNITS/$NAME.service" ]; then
 fi
 
 say "Installing the app to $DEST"
-mkdir -p "$DEST" "$APPS" "$BIN"
+mkdir -p "$DEST" "$APPS" "$BIN" "$ICONS"
 install -m 644 "$SRC/yawcore.py" "$DEST/"
 install -m 755 "$SRC/app.py" "$SRC/yaw-watch.sh" "$SRC/yaw-run" "$DEST/"
 cp -r "$SRC/icons" "$DEST/"
+install -m 644 "$SRC/icons/hicolor/scalable/apps/$APP_ID.svg" "$ICONS/"
 ln -sf "$DEST/app.py" "$BIN/$NAME"
 # the launch option command; Steam has ~/.local/bin in its PATH
 ln -sf "$DEST/yaw-run" "$BIN/$NAME-run"
 
-cat > "$APPS/$NAME.desktop" <<DESKTOP
+# named after the app ID so docks and taskbars match the window to this launcher
+rm -f "$APPS/$NAME.desktop"
+cat > "$APPS/$APP_ID.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=CS:S Yaw
 Comment=Cycle cl_yawspeed with one key and see it on your crosshair
 Exec=python3 $DEST/app.py
-Icon=applications-games
+Icon=$APP_ID
 Categories=Game;Utility;
 Keywords=counter-strike;css;yawspeed;crosshair;surf;
 DESKTOP

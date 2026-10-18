@@ -29,6 +29,8 @@ from pathlib import Path
 
 from PIL import Image
 
+VERSION = "1.0.0"
+
 HOME = Path.home()
 XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
 XDG_DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
@@ -39,8 +41,9 @@ CROSSHAIRS = CONFIG_DIR / "crosshairs"
 CURRENT = CONFIG_DIR / "current.png"
 BUILTIN = CONFIG_DIR / "plain-cross.png"
 WATCH_ENV = CONFIG_DIR / "watch.env"
-# install.sh links yaw-run here; Steam has ~/.local/bin in its PATH
+# install.sh links yaw-run into ~/.local/bin under this name
 RUNNER = "css-yaw-run"
+BIN_DIR = HOME / ".local/bin"
 
 CM_DIR = XDG_CONFIG / "crosshair-maker"
 
@@ -55,6 +58,10 @@ KROSSHAIR_DIR = XDG_DATA / "css-yaw/krosshair"
 KROSSHAIR_JSON = XDG_DATA / "vulkan/implicit_layer.d/css-yaw-krosshair.json"
 
 CS_SUBDIR = Path("steamapps/common/Counter-Strike Source/cstrike")
+# Flatpak Steam keeps its libraries here; css-yaw-run can't run inside its sandbox
+FLATPAK_STEAM = HOME / ".var/app/com.valvesoftware.Steam"
+# first line of every yaws.cfg the app writes; anything else is the user's own file
+YAWS_HEADER = "// Written by CS:S Yaw."
 CSS_APPID = "240"
 
 # short UI sounds to offer; the app only lists the ones this game install has
@@ -106,17 +113,30 @@ def token(value):
 
 def find_cstrike():
     """cstrike folder of the first Steam library that has CS:S installed."""
-    libraries = [HOME / ".local/share/Steam", HOME / ".steam/steam"]
-    vdf = HOME / ".local/share/Steam/steamapps/libraryfolders.vdf"
-    try:
-        libraries += [Path(p) for p in re.findall(r'"path"\s+"([^"]+)"', vdf.read_text())]
-    except OSError:
-        pass
+    libraries = _steam_libraries(HOME / ".local/share/Steam") + [HOME / ".steam/steam"]
     for lib in libraries:
         cstrike = lib / CS_SUBDIR
         if (cstrike / "cfg").is_dir():
             return cstrike
     return None
+
+
+def _steam_libraries(steam):
+    libraries = [steam]
+    try:
+        vdf = (steam / "steamapps/libraryfolders.vdf").read_text()
+        libraries += [Path(p) for p in re.findall(r'"path"\s+"([^"]+)"', vdf)]
+    except OSError:
+        pass
+    return libraries
+
+
+def flatpak_steam_only():
+    """True when CS:S is only found in a Flatpak Steam, which isn't supported."""
+    if find_cstrike():
+        return False
+    return any((lib / CS_SUBDIR / "cfg").is_dir()
+               for lib in _steam_libraries(FLATPAK_STEAM / ".local/share/Steam"))
 
 
 def crosshair_maker_png():
@@ -312,10 +332,32 @@ def keys_bound_to_cycle(cstrike):
     return re.findall(r'^bind "([^"]+)" "yaw_cycle"', text, re.MULTILINE)
 
 
+_BIND = re.compile(r'^\s*bind\s+(?:"([^"]+)"|(\S+))\s+(.*?)\s*$', re.IGNORECASE)
+
+
+def key_conflicts(cstrike, key):
+    """[(file name, command)] for binds of `key` to anything but yaw_cycle in the
+    configs that run before yaws.cfg would take the key over."""
+    found = []
+    for name in ("config.cfg", "autoexec.cfg"):
+        try:
+            lines = (cstrike / "cfg" / name).read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            m = _BIND.match(line.split("//")[0])
+            if not m or (m.group(1) or m.group(2)).lower() != key.lower():
+                continue
+            command = m.group(3).strip().strip('"')
+            if command != "yaw_cycle":
+                found.append((name, command))
+    return found
+
+
 def yaws_cfg(data, unbind=()):
     entries = data["entries"]
     lines = [
-        "// Written by CS:S Yaw. Change it in the app, edits here are overwritten.",
+        f"{YAWS_HEADER} Change it in the app, edits here are overwritten.",
         "// echo goes to the console and yaw.log (read by the crosshair watcher);",
         "// play is a local-only sound cue.",
         "con_logfile yaw.log",
@@ -402,13 +444,38 @@ def apply(data, cstrike, reset_current=False):
     unbind = [k for k in keys_bound_to_cycle(cstrike) if k != data["key"]]
     for key in unbind:
         notes.append(f"'{key}' gets unbound next time yaws.cfg runs")
-    write_text_atomic(cstrike / "cfg/yaws.cfg", yaws_cfg(data, unbind))
+    target = cstrike / "cfg/yaws.cfg"
+    try:
+        theirs = not target.read_text(errors="replace").startswith(YAWS_HEADER)
+    except FileNotFoundError:
+        theirs = False
+    backup = target.with_name("yaws.cfg.bak-css-yaw")
+    if theirs and not backup.exists():
+        # someone's own yaws.cfg: keep it rather than silently replace it
+        shutil.copyfile(target, backup)
+        notes.append("Your old yaws.cfg was saved as yaws.cfg.bak-css-yaw")
+    write_text_atomic(target, yaws_cfg(data, unbind))
     write_crosshairs(data, reset_current)
     # read by yaw-run (shell), so quote the path: it has spaces
     write_text_atomic(WATCH_ENV, f"LOG={shlex.quote(str(cstrike / 'yaw.log'))}\n"
                                  f"COLORS={1 if data['crosshair'] else 0}\n")
     save_settings(data)
     return notes
+
+
+def remove_from_game(cstrike):
+    """For uninstalling: takes yaws.cfg out of autoexec.cfg and deletes it (if it is
+    ours), putting back a yaws.cfg the user had before."""
+    set_autoexec(cstrike, False)
+    target = cstrike / "cfg/yaws.cfg"
+    backup = target.with_name("yaws.cfg.bak-css-yaw")
+    try:
+        if target.read_text(errors="replace").startswith(YAWS_HEADER):
+            target.unlink()
+    except FileNotFoundError:
+        pass
+    if backup.exists() and not target.exists():
+        backup.replace(target)
 
 
 # ---------------------------------------------------------------- sound preview
@@ -555,27 +622,55 @@ def current_launch_options():
     return None
 
 
-def launch_option(current=None):
+def steam_path():
+    """PATH Steam runs with: from the running Steam if there is one, otherwise this
+    session's (Steam started from the desktop gets the same)."""
+    for proc in Path("/proc").iterdir():
+        try:
+            if proc.name.isdigit() and (proc / "comm").read_text().strip() == "steam":
+                env = (proc / "environ").read_bytes().split(b"\0")
+                for item in env:
+                    if item.startswith(b"PATH="):
+                        return item[5:].decode(errors="replace")
+        except OSError:
+            continue
+    return os.environ.get("PATH", "")
+
+
+def runner():
+    """How the launch option should call the wrapper: the short name when Steam can
+    find it in ~/.local/bin, otherwise the full path."""
+    if str(BIN_DIR) in steam_path().split(":"):
+        return RUNNER
+    return shlex.quote(str(Path(__file__).resolve().with_name("yaw-run")))
+
+
+def launch_option(current=None, run=None):
     """The full launch options with the wrapper added, and whether it was there already."""
+    run = run or runner()
     current = (current or "").strip()
     if re.search(r"(^|\s)\S*(css-yaw-run|yaw-run)(\s|$)", current):
-        # already there; also swap an old full path for the short command
-        fixed = re.sub(r"\S*/yaw-run(?=\s|$)", RUNNER, current)
+        # already there; make it the form that works here (short name or full path)
+        fixed = re.sub(r"(?<!\S)\S*(css-yaw-run|/yaw-run)(?=\s|$)", lambda _: run, current)
         return fixed, fixed == current
     if "%command%" in current:
-        return current.replace("%command%", f"{RUNNER} %command%", 1), False
+        return current.replace("%command%", f"{run} %command%", 1), False
     # options without %command% are passed to the game as arguments
-    return " ".join(filter(None, [f"{RUNNER} %command%", current])), False
+    return " ".join(filter(None, [f"{run} %command%", current])), False
 
 
 if __name__ == "__main__":
     # `python3 yawcore.py --apply`: rewrite everything from the saved settings (used by yaw-run and install.sh)
+    # `python3 yawcore.py --remove-from-game`: undo the game side (used by install.sh --uninstall)
     import sys
-    if sys.argv[1:] != ["--apply"]:
-        sys.exit("usage: yawcore.py --apply")
+    if sys.argv[1:] not in (["--apply"], ["--remove-from-game"]):
+        sys.exit("usage: yawcore.py --apply | --remove-from-game")
     cstrike = find_cstrike()
     if not cstrike:
         sys.exit("CS:S not found in your Steam libraries")
+    if sys.argv[1] == "--remove-from-game":
+        remove_from_game(cstrike)
+        sys.exit(0)
     settings = load_settings()
     problems = validate(settings)
     if problems:

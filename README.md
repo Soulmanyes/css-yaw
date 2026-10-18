@@ -9,7 +9,8 @@ active from a sound and from your crosshair colour. Made for surf on Linux.
 
 ## What you need
 
-- Linux, and the native Linux version of CS:S on Steam.
+- Linux, and the native Linux version of CS:S on Steam. Steam from your distro's packages
+  works. Flatpak Steam doesn't, because `css-yaw-run` can't run inside its sandbox.
 - Python 3, GTK 4, libadwaita 1.5 or newer, PyGObject and Pillow. `install.sh` installs
   them if they are missing.
 - For the crosshair colours: KROSSHAIR. If it isn't installed, the app can install it for
@@ -32,12 +33,19 @@ Then:
    css-yaw-run %command%
    ```
 
+   If Steam can't find `css-yaw-run` (it lives in `~/.local/bin`), the app shows the full
+   path instead.
+
 To remove the app, run `./install.sh --uninstall` and take `css-yaw-run` out of the
-launch options.
+launch options. It asks whether to remove `yaws.cfg` and its `autoexec.cfg` line too.
+
+If you already had a `yaws.cfg` of your own, the app saves it as `yaws.cfg.bak-css-yaw`
+before writing its own, and uninstalling puts it back.
 
 ## In the app
 
-- **Cycle key:** press any key, mouse button or wheel direction to bind it.
+- **Cycle key:** press any key, mouse button or wheel direction to bind it. If that key is
+  already bound to something else, the app tells you what.
 - **Yawspeeds:** add, remove or drag them into order. Each one has a crosshair colour and a
   sound, which you can preview from the dropdown. The ticked one is set when the game starts.
 - **Change crosshair colour:** turn the colour changing off if you only want the sounds.

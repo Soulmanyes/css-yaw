@@ -287,6 +287,8 @@ class Window(Adw.ApplicationWindow):
         self.toasts = Adw.ToastOverlay()
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
+        self.title_widget = Adw.WindowTitle(title="CS:S Yaw", subtitle=f"Version {core.VERSION}")
+        header.set_title_widget(self.title_widget)
         self.apply_btn = Gtk.Button(label="Apply")
         self.apply_btn.add_css_class("suggested-action")
         self.apply_btn.connect("clicked", self.apply)
@@ -302,8 +304,7 @@ class Window(Adw.ApplicationWindow):
         self.set_content(view)
 
         keys = Adw.PreferencesGroup(title="Keybind")
-        self.key_row = Adw.ActionRow(title="Cycle key",
-                                     subtitle="Each press switches to the next yawspeed")
+        self.key_row = Adw.ActionRow(title="Cycle key")
         self.key_text = Gtk.Label(valign=Gtk.Align.CENTER)
         self.key_text.add_css_class("heading")
         self.key_row.add_suffix(self.key_text)
@@ -380,6 +381,7 @@ class Window(Adw.ApplicationWindow):
 
         self.key = self.data["key"]
         self.key_text.set_label(self.key)
+        self.show_key_conflicts()
         for entry in self.data["entries"]:
             self.add_entry(entry=entry)
         self.rows[self.data["start"]].start.set_active(True)
@@ -390,7 +392,10 @@ class Window(Adw.ApplicationWindow):
 
     def check_setup(self):
         problem = None
-        if not self.cstrike:
+        if not self.cstrike and core.flatpak_steam_only():
+            problem = ("Flatpak Steam isn't supported: css-yaw-run can't run inside "
+                       "its sandbox. Use Steam from your distro's packages")
+        elif not self.cstrike:
             problem = "Counter-Strike: Source not found in your Steam libraries"
         self.banner.set_title(problem or "")
         self.banner.set_revealed(bool(problem))
@@ -511,7 +516,9 @@ class Window(Adw.ApplicationWindow):
 
     def set_dirty(self, dirty):
         self.dirty = dirty
-        self.set_title("CS:S Yaw" + (" •" if dirty else ""))
+        title = "CS:S Yaw" + (" •" if dirty else "")
+        self.set_title(title)
+        self.title_widget.set_title(title)
 
     def changed(self):
         self.set_dirty(True)
@@ -524,10 +531,22 @@ class Window(Adw.ApplicationWindow):
 
     # ------------------------------------------------------------ actions
 
+    def show_key_conflicts(self):
+        conflicts = core.key_conflicts(self.cstrike, self.key) if self.cstrike else []
+        if not conflicts:
+            self.key_row.set_subtitle("Each press switches to the next yawspeed")
+            return
+        commands = sorted({cmd for _, cmd in conflicts})
+        text = f"⚠ {self.key} is bound to {', '.join(commands)} now. Apply replaces that"
+        if any(name == "autoexec.cfg" for name, _ in conflicts):
+            text += ", but the bind in autoexec.cfg may still win if it comes after exec yaws.cfg"
+        self.key_row.set_subtitle(GLib.markup_escape_text(text))
+
     def capture_key(self, *_):
         def got(key):
             self.key = key
             self.key_text.set_label(key)
+            self.show_key_conflicts()
             self.changed()
         KeyCaptureDialog(got).present(self)
 
@@ -585,7 +604,8 @@ class Window(Adw.ApplicationWindow):
 
     def show_launch_option(self):
         current = core.current_launch_options()
-        self.launch_option, already = core.launch_option(current)
+        run = core.runner()
+        self.launch_option, already = core.launch_option(current, run)
         self.launch_row.set_title(GLib.markup_escape_text(self.launch_option))
         if current is None:
             note = "Couldn't read your Steam launch options. Put css-yaw-run before %command%"
@@ -595,6 +615,8 @@ class Window(Adw.ApplicationWindow):
             note = "Your current launch options with css-yaw-run added. Replace them with this"
         else:
             note = "You have no launch options yet. Paste this in"
+        if run != core.RUNNER:
+            note += ". Steam can't find css-yaw-run by name here, so this uses the full path"
         self.launch_row.set_subtitle(note)
 
     def copy(self, text):
@@ -607,9 +629,10 @@ class App(Adw.Application):
         super().__init__(application_id=APP_ID)
 
     def do_activate(self):
-        # our own icons (icon themes like Papirus have no drag handle)
+        # our own icons: the app icon, and a drag handle (themes like Papirus have none)
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
             os.path.join(os.path.dirname(os.path.realpath(__file__)), "icons"))
+        Gtk.Window.set_default_icon_name(APP_ID)
         win = self.get_active_window() or Window(self)
         win.present()
 
