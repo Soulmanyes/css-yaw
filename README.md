@@ -3,14 +3,9 @@
 Cycle `cl_yawspeed` in Counter-Strike: Source with one key, and see which yawspeed is
 active from a sound and from your crosshair colour. Made for surf on Linux.
 
-You can't print to chat without annoying everyone, `developer 1` is cheat-protected
-on servers, and a desktop popup over a fullscreen game makes it stutter. So CS:S Yaw
-tells you the yawspeed two other ways:
-
 - **Sound:** a short game sound plays when you switch, and only you hear it.
 - **Crosshair colour:** a [KROSSHAIR](https://github.com/noahlyk/krosshair) crosshair
-  changes colour for each yawspeed. KROSSHAIR draws inside the game's own frames, so this
-  adds no overlay and no stutter.
+  changes colour for each yawspeed.
 
 ## What you need
 
@@ -37,9 +32,6 @@ Then:
    css-yaw-run %command%
    ```
 
-   `css-yaw-run` turns KROSSHAIR on for the game by itself, so you don't need
-   `KROSSHAIR=1` for the colours.
-
 To remove the app, run `./install.sh --uninstall` and take `css-yaw-run` out of the
 launch options.
 
@@ -52,13 +44,9 @@ launch options.
 - **Crosshair:** the image that gets recoloured. Choose your crosshair-maker crosshair if
   you use it, the built-in plain cross, or any PNG. The crosshairs that come with KROSSHAIR
   are offered in the file picker.
-- **KROSSHAIR:** if it isn't installed, **Install** downloads KROSSHAIR 0.2.5 (GPL-3.0)
-  from its GitHub releases. The download is checked against a pinned checksum and goes into
-  your user folder (`~/.local/share/css-yaw/krosshair`, plus a layer file in
-  `~/.local/share/vulkan/implicit_layer.d`), so no password is needed. Nothing is
-  downloaded unless you press the button. Only x86_64 builds exist. Steam runs CS:S in its
-  Linux runtime container, which picks up layers from that user folder the same way it picks
-  up Steam's own overlay. Installing KROSSHAIR from your distro works just as well.
+- **KROSSHAIR:** if it isn't installed, **Install** downloads KROSSHAIR 0.2.5 (GPL-3.0,
+  x86_64 only) from its GitHub releases into your user folder. No password is needed, and
+  nothing is downloaded unless you press it.
 
 If the game is already running when you press Apply, run `exec yaws` in the console.
 
@@ -72,8 +60,6 @@ If the game is already running when you press Apply, run `exec yaws` in the cons
   `KROSSHAIR_IMG=~/.config/css-yaw/current.png`. While the game runs, it watches
   `yaw.log` and copies the matching colour over that file on each `YAW_<speed>` line.
   KROSSHAIR reloads the file whenever it changes.
-- Your crosshair-maker files are never changed. KROSSHAIR does still read crosshair-maker's
-  `current.dynamic.png`/`.cfg` effects if you have them.
 
 Settings and generated images are stored in `~/.config/css-yaw`.
 
