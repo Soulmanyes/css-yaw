@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Steam launch option wrapper for CS:S Yaw. Put it right before %command%:
 #   css-yaw-run %command%   (install.sh links it into ~/.local/bin)
-# Rewrites yaws.cfg and the crosshair colours from the app's settings, and swaps
-# the crosshair colour while the game runs. It turns KROSSHAIR on for the game
-# and points it at our own image, so crosshair-maker's files are never touched.
+# Rewrites yaws.cfg and the crosshair colours from the app's settings. For CS:S it
+# also swaps the crosshair colour while the game runs: it turns KROSSHAIR on for
+# the game and points it at our own image, so crosshair-maker's files are never
+# touched. Momentum Mod sets its crosshair colour itself, so it only needs the apply.
 # keep Steam's runtime libraries and overlay out of our own helpers; the game gets them back
 GAME_PRELOAD=${LD_PRELOAD-}
 GAME_LIBS=${LD_LIBRARY_PATH-}
@@ -14,11 +15,19 @@ CFG="${XDG_CONFIG_HOME:-$HOME/.config}/css-yaw"
 RUNLOG="$CFG/run.log"
 mkdir -p "$CFG"
 
-{ date; python3 "$DIR/yawcore.py" --apply; } > "$RUNLOG" 2>&1
+# which game: Steam's command line carries AppId=<id> (its reaper wrapper)
+GAME=css
+for arg in "$@"; do
+    case $arg in
+        AppId=1802710) GAME=momentum ;;
+    esac
+done
+
+{ date; echo "game: $GAME"; python3 "$DIR/yawcore.py" --apply "$GAME"; } > "$RUNLOG" 2>&1
 # shellcheck source=/dev/null
 . "$CFG/watch.env" 2>/dev/null
 
-if [ "${COLORS:-0}" = 1 ] && [ -n "${LOG:-}" ] && [ -f "$CFG/current.png" ]; then
+if [ "$GAME" = css ] && [ "${COLORS:-0}" = 1 ] && [ -n "${LOG:-}" ] && [ -f "$CFG/current.png" ]; then
     export KROSSHAIR=1 KROSSHAIR_IMG="$CFG/current.png"
     # started directly (not via a function) so $! is the watcher itself
     LOG="$LOG" "$DIR/yaw-watch.sh" >> "$RUNLOG" 2>&1 &

@@ -385,9 +385,10 @@ class EntryRow(Adw.ActionRow):
 
     def play_sound(self, index):
         sound = self.choices[index][0]
-        if not (self.window.cstrike and core.play_sound(self.window.cstrike, sound)):
+        if not (self.window.cstrike
+                and core.play_sound(self.window.cstrike, sound, self.window.game)):
             self.window.toasts.add_toast(Adw.Toast(
-                title=f"Couldn't find {sound} in your CS:S files", timeout=3))
+                title=f"Couldn't find {sound} in your game files", timeout=3))
 
     def format_speed(self, spin):
         spin.set_text(core.fmt_speed(spin.get_value()))
@@ -405,20 +406,30 @@ class EntryRow(Adw.ActionRow):
 
 
 class Window(Adw.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, game=None):
         super().__init__(application=app, title="CS:S Yaw")
         self.set_default_size(620, 640)
-        self.cstrike = core.find_cstrike()
-        self.data = core.load_settings()
+        installed = core.installed_games()
+        if game is None:
+            game = core.last_game()
+            if game not in installed and installed:
+                game = installed[0]
+        self.game = game
+        self.info = core.GAMES[game]
+        # Momentum sets its own crosshair colour from yaws.cfg; CS:S goes through KROSSHAIR
+        self.uses_krosshair = self.info["colors"] == "krosshair"
+        self.cstrike = core.find_game(game)  # the game's mod folder (cstrike, momentum)
+        self.data = core.load_settings(game)
         self.base_choice = self.data["base"]
-        self.base = core.resolve_base(self.data)
-        sounds = core.available_sounds(self.cstrike) if self.cstrike else core.SOUNDS
+        self.base = core.resolve_base(self.data) if self.uses_krosshair else core.plain_cross()
+        sounds = core.available_sounds(self.cstrike, game) if self.cstrike else core.SOUNDS
         self.sound_choices = [("", "None")] + [(s, s) for s in sounds]
         self.rows = []
 
         self.toasts = Adw.ToastOverlay()
         header = Adw.HeaderBar()
-        self.title_widget = Adw.WindowTitle(title="CS:S Yaw", subtitle=f"Version {core.VERSION}")
+        self.title_widget = Adw.WindowTitle(
+            title="CS:S Yaw", subtitle=f"{self.info['name']} · Version {core.VERSION}")
         header.set_title_widget(self.title_widget)
         self.apply_btn = Gtk.Button(label="Apply")
         self.apply_btn.add_css_class("suggested-action")
@@ -429,6 +440,24 @@ class Window(Adw.ApplicationWindow):
         page = Adw.PreferencesPage()
         self.toasts.set_child(page)
         self.set_content(toolbar_view([header, self.banner], self.toasts))
+
+        game_group = Adw.PreferencesGroup(title="Game")
+        if len(installed) > 1:
+            self.game_ids = installed
+            self.game_row = Adw.ComboRow(title="Game", subtitle="Each game has its own settings")
+            self.game_row.set_model(Gtk.StringList.new([core.GAMES[g]["name"] for g in installed]))
+            self.game_row.set_selected(installed.index(game) if game in installed else 0)
+            self.game_row.connect("notify::selected", self.switch_game)
+            game_group.add(self.game_row)
+        self.autoexec_row = SwitchRow(
+            title="Load from autoexec.cfg",
+            subtitle="Adds exec yaws.cfg to your autoexec.cfg, so the game loads your "
+                     "yawspeed binds when it starts")
+        self.autoexec_row.set_active(bool(self.cstrike) and core.autoexec_runs_yaws(self.cstrike))
+        self.autoexec_row.set_sensitive(bool(self.cstrike))
+        self.autoexec_row.connect("notify::active", self.toggle_autoexec)
+        game_group.add(self.autoexec_row)
+        page.add(game_group)
 
         keys = Adw.PreferencesGroup(title="Keybind")
         self.key_row = Adw.ActionRow(title="Cycle key")
@@ -454,11 +483,27 @@ class Window(Adw.ApplicationWindow):
         cross = Adw.PreferencesGroup(title="Crosshair")
         self.color_row = SwitchRow(
             title="Change crosshair colour",
-            subtitle="Shows a KROSSHAIR crosshair in the colour of the current yawspeed")
+            subtitle="Shows a KROSSHAIR crosshair in the colour of the current yawspeed"
+            if self.uses_krosshair else
+            f"Sets {self.info['name']}'s own crosshair to the colour of the current yawspeed")
         self.color_row.set_active(self.data["crosshair"])
         self.color_row.connect("notify::active", lambda *_: self.changed())
         cross.add(self.color_row)
+        page.add(cross)
+        if self.uses_krosshair:
+            self.add_krosshair_rows(cross)
+            self.add_steam_group(page)
 
+        self.key = self.data["key"]
+        self.key_text.set_label(self.key)
+        self.show_key_conflicts()
+        for entry in self.data["entries"]:
+            self.add_entry(entry=entry)
+        self.rows[self.data["start"]].start.set_active(True)
+        self.check_setup()
+        self.set_dirty(False)
+
+    def add_krosshair_rows(self, cross):
         self.base_row = Adw.ComboRow(
             title="Crosshair",
             subtitle="Every visible pixel gets the yawspeed's colour, so outlines "
@@ -473,19 +518,8 @@ class Window(Adw.ApplicationWindow):
         self.krosshair_row.add_suffix(self.krosshair_btn)
         cross.add(self.krosshair_row)
         self.show_krosshair()
-        page.add(cross)
 
-        game = Adw.PreferencesGroup(title="Game")
-        self.autoexec_row = SwitchRow(
-            title="Load from autoexec.cfg",
-            subtitle="Adds exec yaws.cfg to your autoexec.cfg, so the game loads your "
-                     "yawspeed binds when it starts")
-        self.autoexec_row.set_active(bool(self.cstrike) and core.autoexec_runs_yaws(self.cstrike))
-        self.autoexec_row.set_sensitive(bool(self.cstrike))
-        self.autoexec_row.connect("notify::active", self.toggle_autoexec)
-        game.add(self.autoexec_row)
-        page.add(game)
-
+    def add_steam_group(self, page):
         steam = Adw.PreferencesGroup(
             title="Steam launch options",
             description="CS:S Properties → Launch Options. css-yaw-run applies these "
@@ -506,24 +540,15 @@ class Window(Adw.ApplicationWindow):
         page.add(steam)
         self.show_launch_option()
 
-        self.key = self.data["key"]
-        self.key_text.set_label(self.key)
-        self.show_key_conflicts()
-        for entry in self.data["entries"]:
-            self.add_entry(entry=entry)
-        self.rows[self.data["start"]].start.set_active(True)
-        self.check_setup()
-        self.set_dirty(False)
-
     # ------------------------------------------------------------ state
 
     def check_setup(self):
         problem = None
-        if not self.cstrike and core.flatpak_steam_only():
+        if not self.cstrike and core.flatpak_steam_only(self.game):
             problem = ("Flatpak Steam isn't supported: css-yaw-run can't run inside "
                        "its sandbox. Use Steam from your distro's packages")
         elif not self.cstrike:
-            problem = "Counter-Strike: Source not found in your Steam libraries"
+            problem = f"{self.info['name']} not found in your Steam libraries"
         self.banner.set_title(problem or "")
         self.banner.set_revealed(bool(problem))
         self.apply_btn.set_sensitive(bool(self.cstrike))
@@ -574,6 +599,22 @@ class Window(Adw.ApplicationWindow):
         for row in self.rows:
             row.update_preview()
         self.changed()
+
+    def switch_game(self, row, _):
+        game = self.game_ids[row.get_selected()]
+        if game == self.game:
+            return
+        if self.dirty:
+            # each game has its own settings; don't drop unapplied changes silently
+            self.toasts.add_toast(Adw.Toast(title="Apply your changes before switching game",
+                                            timeout=4))
+            row.handler_block_by_func(self.switch_game)
+            row.set_selected(self.game_ids.index(self.game))
+            row.handler_unblock_by_func(self.switch_game)
+            return
+        core.set_last_game(game)
+        Window(self.get_application(), game).present()
+        self.destroy()
 
     def toggle_autoexec(self, row, _):
         on = row.get_active()
@@ -640,6 +681,8 @@ class Window(Adw.ApplicationWindow):
         start = next((i for i, row in enumerate(self.rows) if row.start.get_active()), 0)
         return {"key": self.key, "crosshair": self.color_row.get_active(), "start": start,
                 "base": self.base_choice,
+                # Momentum: the user's own crosshair colour, put back when colours are off
+                "original_color": self.data.get("original_color"),
                 "entries": [row.value() for row in self.rows]}
 
     # ------------------------------------------------------------ actions
@@ -705,7 +748,7 @@ class Window(Adw.ApplicationWindow):
             self.toasts.add_toast(Adw.Toast(title=problems[0], timeout=4))
             return
         try:
-            notes = core.apply(data, self.cstrike)
+            notes = core.apply(data, self.cstrike, game=self.game)
         except OSError as e:
             self.toasts.add_toast(Adw.Toast(title=f"Not saved: {e.strerror}", timeout=5))
             return
@@ -716,7 +759,7 @@ class Window(Adw.ApplicationWindow):
             title="Saved. Game already open? Run: exec yaws", timeout=6))
 
     def show_launch_option(self):
-        current = core.current_launch_options()
+        current = core.current_launch_options(self.game)
         run = core.runner()
         self.launch_option, already = core.launch_option(current, run)
         self.launch_row.set_title(GLib.markup_escape_text(self.launch_option))

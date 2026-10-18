@@ -91,11 +91,11 @@ cat > "$APPS/$APP_ID.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=CS:S Yaw
-Comment=Cycle cl_yawspeed with one key and see it on your crosshair
+Comment=Cycle cl_yawspeed in CS:S or Momentum Mod and see it on your crosshair
 Exec=python3 $DEST/app.py
 Icon=$APP_ID
 Categories=Game;Utility;
-Keywords=counter-strike;css;yawspeed;crosshair;surf;
+Keywords=counter-strike;css;momentum;yawspeed;crosshair;surf;
 DESKTOP
 
 say "Writing yaws.cfg and crosshair colours from your settings"
