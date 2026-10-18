@@ -196,10 +196,11 @@ def pick_png(parent, title, folder, on_path):
 
 # the game switch picks one of two games, not on/off, so both sides look the same
 APP_CSS = """
+switch.game-switch, switch.game-switch:hover,
 switch.game-switch:checked, switch.game-switch:checked:hover {
-    background-color: alpha(currentColor, 0.15);
+    background-color: @accent_bg_color;
 }
-switch.game-switch:checked > slider { background-color: white; }
+switch.game-switch > slider, switch.game-switch:checked > slider { background-color: white; }
 """
 
 
