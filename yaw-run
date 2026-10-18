@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Steam launch option wrapper for CS:S Yaw. Put it right before %command%:
-#   KROSSHAIR=1 css-yaw-run %command%   (install.sh links it into ~/.local/bin)
-# Rewrites yaws.cfg and the crosshair colours from the app's settings, swaps the
-# crosshair colour while the game runs, and restores your crosshair afterwards.
+#   css-yaw-run %command%   (install.sh links it into ~/.local/bin)
+# Rewrites yaws.cfg and the crosshair colours from the app's settings, and swaps
+# the crosshair colour while the game runs. It turns KROSSHAIR on for the game
+# and points it at our own image, so crosshair-maker's files are never touched.
 # keep Steam's runtime libraries and overlay out of our own helpers; the game gets them back
 GAME_PRELOAD=${LD_PRELOAD-}
 GAME_LIBS=${LD_LIBRARY_PATH-}
@@ -17,7 +18,8 @@ mkdir -p "$CFG"
 # shellcheck source=/dev/null
 . "$CFG/watch.env" 2>/dev/null
 
-if [ "${COLORS:-0}" = 1 ] && [ -n "${LOG:-}" ]; then
+if [ "${COLORS:-0}" = 1 ] && [ -n "${LOG:-}" ] && [ -f "$CFG/current.png" ]; then
+    export KROSSHAIR=1 KROSSHAIR_IMG="$CFG/current.png"
     # started directly (not via a function) so $! is the watcher itself
     LOG="$LOG" "$DIR/yaw-watch.sh" >> "$RUNLOG" 2>&1 &
     WATCHER=$!

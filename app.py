@@ -4,12 +4,13 @@
 import io
 import os
 import sys
+import threading
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, GObject, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import yawcore as core  # noqa: E402
@@ -276,8 +277,9 @@ class Window(Adw.ApplicationWindow):
         super().__init__(application=app, title="CS:S Yaw")
         self.set_default_size(620, 640)
         self.cstrike = core.find_cstrike()
-        self.base = core.base_crosshair()
-        self.data = core.load_settings(self.base)
+        self.data = core.load_settings()
+        self.base_choice = self.data["base"]
+        self.base = core.resolve_base(self.data)
         sounds = core.available_sounds(self.cstrike) if self.cstrike else core.SOUNDS
         self.sound_choices = [("", "None")] + [(s, s) for s in sounds]
         self.rows = []
@@ -324,16 +326,25 @@ class Window(Adw.ApplicationWindow):
         cross = Adw.PreferencesGroup(title="Crosshair")
         self.color_row = Adw.SwitchRow(
             title="Change crosshair colour",
-            subtitle="Recolours your KROSSHAIR crosshair for each yawspeed")
+            subtitle="Shows a KROSSHAIR crosshair in the colour of the current yawspeed")
         self.color_row.set_active(self.data["crosshair"])
         self.color_row.connect("notify::active", lambda *_: self.changed())
         cross.add(self.color_row)
-        base_name = self.base.stem if self.base else "none found"
-        cross.add(Adw.ActionRow(
-            title="Base crosshair",
-            subtitle=f"{base_name} (from crosshair-maker). Every visible pixel gets the "
-                     "chosen colour, so outlines lose their own colour. "
-                     "Picked a new crosshair there? Press Apply again."))
+
+        self.base_row = Adw.ComboRow(
+            title="Crosshair",
+            subtitle="Every visible pixel gets the yawspeed's colour, so outlines "
+                     "lose their own colour")
+        self.base_row.connect("notify::selected", self.base_selected)
+        cross.add(self.base_row)
+        self.fill_base_row()
+
+        self.krosshair_row = Adw.ActionRow(title="KROSSHAIR")
+        self.krosshair_btn = Gtk.Button(label="Install", valign=Gtk.Align.CENTER)
+        self.krosshair_btn.connect("clicked", self.install_krosshair)
+        self.krosshair_row.add_suffix(self.krosshair_btn)
+        cross.add(self.krosshair_row)
+        self.show_krosshair()
         page.add(cross)
 
         steam = Adw.PreferencesGroup(
@@ -370,16 +381,108 @@ class Window(Adw.ApplicationWindow):
         problem = None
         if not self.cstrike:
             problem = "Counter-Strike: Source not found in your Steam libraries"
-        elif not self.base:
-            problem = "No crosshair found. Pick one in crosshair-maker first"
-        elif not core.krosshair_installed():
-            problem = "KROSSHAIR is not installed, so colours will not show"
-        elif core.shadowing_files():
-            problem = (f"crosshair-maker has {', '.join(core.shadowing_files())}, "
-                       "which KROSSHAIR uses instead of the recoloured image")
         self.banner.set_title(problem or "")
         self.banner.set_revealed(bool(problem))
-        self.apply_btn.set_sensitive(bool(self.cstrike and self.base))
+        self.apply_btn.set_sensitive(bool(self.cstrike))
+
+    # ------------------------------------------------------------ crosshair
+
+    def base_options(self):
+        options = []
+        cm = core.crosshair_maker_png()
+        if cm:
+            options.append(("crosshair-maker", f"crosshair-maker: {cm.stem}"))
+        options.append(("builtin", "Plain cross"))
+        if self.base_choice not in ("crosshair-maker", "builtin"):
+            options.append((self.base_choice, os.path.basename(self.base_choice)))
+        options.append(("pick", "Choose an image…"))
+        return options
+
+    def fill_base_row(self):
+        self.base_opts = self.base_options()
+        values = [v for v, _ in self.base_opts]
+        # an unavailable choice (crosshair-maker gone) shows what is used instead
+        current = self.base_choice if self.base_choice in values else "builtin"
+        self.filling = True
+        self.base_row.set_model(Gtk.StringList.new([label for _, label in self.base_opts]))
+        self.base_row.set_selected(values.index(current))
+        self.filling = False
+
+    def base_selected(self, *_):
+        if self.filling:
+            return
+        value = self.base_opts[self.base_row.get_selected()][0]
+        if value == "pick":
+            self.pick_image()
+        else:
+            self.set_base(value)
+
+    def pick_image(self):
+        dialog = Gtk.FileDialog(title="Choose a crosshair image")
+        png = Gtk.FileFilter(name="PNG images")
+        png.add_mime_type("image/png")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(png)
+        dialog.set_filters(filters)
+        folder = core.krosshair_crosshairs()
+        if folder:
+            dialog.set_initial_folder(Gio.File.new_for_path(str(folder)))
+
+        def done(dlg, result):
+            try:
+                path = dlg.open_finish(result).get_path()
+            except GLib.Error:
+                path = None  # cancelled
+            if path:
+                self.set_base(path)
+            self.fill_base_row()
+
+        dialog.open(self, None, done)
+
+    def set_base(self, choice):
+        self.base_choice = choice
+        self.base = core.resolve_base({"base": choice})
+        for row in self.rows:
+            row.update_preview()
+        self.changed()
+
+    def show_krosshair(self):
+        manifest = core.krosshair_installed()
+        if manifest:
+            self.krosshair_row.set_subtitle(f"Installed ({manifest})")
+        elif core.can_install_krosshair():
+            self.krosshair_row.set_subtitle(
+                f"Not installed. Install downloads KROSSHAIR {core.KROSSHAIR_VERSION} "
+                "(GPL-3.0) from github.com/noahlyk/krosshair into your user folder. "
+                "No password needed.")
+        else:
+            self.krosshair_row.set_subtitle(
+                "Not installed. Get it from github.com/noahlyk/krosshair")
+        self.krosshair_btn.set_visible(not manifest and core.can_install_krosshair())
+
+    def install_krosshair(self, *_):
+        self.krosshair_btn.set_sensitive(False)
+        self.krosshair_btn.set_label("Installing…")
+
+        def work():
+            try:
+                core.install_krosshair()
+                error = None
+            except Exception as e:  # network, checksum, disk: all shown to the user
+                error = str(e)
+            GLib.idle_add(finished, error)
+
+        def finished(error):
+            self.krosshair_btn.set_sensitive(True)
+            self.krosshair_btn.set_label("Install")
+            self.show_krosshair()
+            self.toasts.add_toast(Adw.Toast(
+                title=f"Couldn't install KROSSHAIR: {error}" if error
+                else "KROSSHAIR installed. It works the next time you start CS:S",
+                timeout=5))
+            return False
+
+        threading.Thread(target=work, daemon=True).start()
 
     def set_dirty(self, dirty):
         self.dirty = dirty
@@ -391,6 +494,7 @@ class Window(Adw.ApplicationWindow):
     def collect(self):
         start = next((i for i, row in enumerate(self.rows) if row.start.get_active()), 0)
         return {"key": self.key, "crosshair": self.color_row.get_active(), "start": start,
+                "base": self.base_choice,
                 "entries": [row.value() for row in self.rows]}
 
     # ------------------------------------------------------------ actions
@@ -444,7 +548,7 @@ class Window(Adw.ApplicationWindow):
             self.toasts.add_toast(Adw.Toast(title=problems[0], timeout=4))
             return
         try:
-            notes = core.apply(data, self.cstrike, self.base)
+            notes = core.apply(data, self.cstrike)
         except OSError as e:
             self.toasts.add_toast(Adw.Toast(title=f"Not saved: {e.strerror}", timeout=5))
             return

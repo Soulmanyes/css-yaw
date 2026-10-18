@@ -17,7 +17,10 @@ say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 
 if [ "${1:-}" = "--uninstall" ]; then
     say "Removing CS:S Yaw"
-    rm -rf "$DEST" "$APPS/$NAME.desktop" "$BIN/$NAME" "$BIN/$NAME-run"
+    # $DEST also holds KROSSHAIR if the app installed it; drop its layer manifest too,
+    # or the Vulkan loader is left pointing at a missing library
+    rm -rf "$DEST" "$APPS/$NAME.desktop" "$BIN/$NAME" "$BIN/$NAME-run" \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/vulkan/implicit_layer.d/$NAME-krosshair.json"
     say "Done. Your settings stay in ~/.config/$NAME and yaws.cfg stays in CS:S."
     echo "Remove $NAME-run from the CS:S launch options, or the game will not start."
     exit 0

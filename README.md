@@ -8,7 +8,7 @@ on servers, and a desktop popup over a fullscreen game makes it stutter. So CS:S
 tells you the yawspeed two other ways:
 
 - **Sound:** a short game sound plays when you switch, and only you hear it.
-- **Crosshair colour:** your [KROSSHAIR](https://github.com/fibsussy/krosshair) crosshair
+- **Crosshair colour:** a [KROSSHAIR](https://github.com/noahlyk/krosshair) crosshair
   changes colour for each yawspeed. KROSSHAIR draws inside the game's own frames, so this
   adds no overlay and no stutter.
 
@@ -17,8 +17,8 @@ tells you the yawspeed two other ways:
 - Linux, and the native Linux version of CS:S on Steam.
 - Python 3, GTK 4, libadwaita 1.5 or newer, PyGObject and Pillow. `install.sh` installs
   them if they are missing.
-- For the crosshair colours: KROSSHAIR with a crosshair picked in crosshair-maker, and
-  `KROSSHAIR=1` in your launch options.
+- For the crosshair colours: KROSSHAIR. If it isn't installed, the app can install it for
+  you (see below). crosshair-maker is optional.
 
 ## Install
 
@@ -31,11 +31,14 @@ Then:
 1. Make sure your `autoexec.cfg` has the line `exec yaws.cfg`.
 2. Open **CS:S Yaw**, pick your key, yawspeeds, colours and sounds, and press **Apply**.
 3. Add `css-yaw-run` right before `%command%` in the CS:S launch options. The app shows
-   your current launch options with it added, ready to copy, for example:
+   your current launch options with it added, ready to copy. With no other options:
 
    ```
-   KROSSHAIR=1 css-yaw-run %command%
+   css-yaw-run %command%
    ```
+
+   `css-yaw-run` turns KROSSHAIR on for the game by itself, so you don't need
+   `KROSSHAIR=1` for the colours.
 
 To remove the app, run `./install.sh --uninstall` and take `css-yaw-run` out of the
 launch options.
@@ -46,6 +49,16 @@ launch options.
 - **Yawspeeds:** add, remove or drag them into order. Each one has a crosshair colour and a
   sound, which you can preview from the dropdown. The ticked one is set when the game starts.
 - **Change crosshair colour:** turn the colour changing off if you only want the sounds.
+- **Crosshair:** the image that gets recoloured. Choose your crosshair-maker crosshair if
+  you use it, the built-in plain cross, or any PNG. The crosshairs that come with KROSSHAIR
+  are offered in the file picker.
+- **KROSSHAIR:** if it isn't installed, **Install** downloads KROSSHAIR 0.2.5 (GPL-3.0)
+  from its GitHub releases. The download is checked against a pinned checksum and goes into
+  your user folder (`~/.local/share/css-yaw/krosshair`, plus a layer file in
+  `~/.local/share/vulkan/implicit_layer.d`), so no password is needed. Nothing is
+  downloaded unless you press the button. Only x86_64 builds exist. Steam runs CS:S in its
+  Linux runtime container, which picks up layers from that user folder the same way it picks
+  up Steam's own overlay. Installing KROSSHAIR from your distro works just as well.
 
 If the game is already running when you press Apply, run `exec yaws` in the console.
 
@@ -55,10 +68,12 @@ If the game is already running when you press Apply, run `exec yaws` in the cons
   sound with `play`, and runs `echo YAW_<speed>`. `con_logfile yaw.log` copies the console
   to a file.
 - `css-yaw-run` wraps the game. It rebuilds `yaws.cfg` and the coloured crosshairs from
-  your settings, then watches `yaw.log` while the game runs. On each `YAW_<speed>` line, it
-  copies that colour over crosshair-maker's `current.png`. KROSSHAIR reloads that file
-  whenever it changes.
-- When the game exits, `css-yaw-run` puts your normal crosshair back.
+  your settings, then starts the game with `KROSSHAIR=1` and
+  `KROSSHAIR_IMG=~/.config/css-yaw/current.png`. While the game runs, it watches
+  `yaw.log` and copies the matching colour over that file on each `YAW_<speed>` line.
+  KROSSHAIR reloads the file whenever it changes.
+- Your crosshair-maker files are never changed. KROSSHAIR does still read crosshair-maker's
+  `current.dynamic.png`/`.cfg` effects if you have them.
 
 Settings and generated images are stored in `~/.config/css-yaw`.
 
@@ -71,5 +86,6 @@ Settings and generated images are stored in `~/.config/css-yaw`.
 
 ## License
 
-[CC0 1.0](LICENSE). Public domain, do what you like. CS:S Yaw ships no game files: it
-plays sounds straight from your own CS:S install.
+[CC0 1.0](LICENSE). Public domain, do what you like. CS:S Yaw ships no third-party files:
+it plays sounds straight from your own CS:S install, and KROSSHAIR is only downloaded from
+its own releases if you ask for it.

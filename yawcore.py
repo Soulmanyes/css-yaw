@@ -5,36 +5,54 @@ The pieces fit together like this:
     key sets the next cl_yawspeed, plays its sound and echoes YAW_<speed>.
   - `con_logfile yaw.log` copies the console into cstrike/yaw.log.
   - yaw-watch.sh tails that log and copies crosshairs/YAW_<speed>.png over
-    crosshair-maker's current.png, which the KROSSHAIR Vulkan layer reloads
-    inside the game's own frames (no compositor overlay, so no stutter).
+    ~/.config/css-yaw/current.png. The game runs with KROSSHAIR_IMG pointing at
+    that file, and the KROSSHAIR Vulkan layer reloads it inside the game's own
+    frames (no compositor overlay, so no stutter).
   - yaw-run is the Steam launch option wrapper: it runs `yawcore.py --apply`,
-    starts yaw-watch.sh for as long as the game runs, then restores the crosshair.
-    The app only edits settings (and applies them right away for convenience).
+    sets KROSSHAIR=1 and KROSSHAIR_IMG for the game, and runs yaw-watch.sh for
+    as long as the game runs. The app only edits settings.
 """
 
+import hashlib
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
 import struct
 import subprocess
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
 from PIL import Image
 
 HOME = Path.home()
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "css-yaw"
+XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
+XDG_DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
+CONFIG_DIR = XDG_CONFIG / "css-yaw"
 SETTINGS = CONFIG_DIR / "settings.json"
 CROSSHAIRS = CONFIG_DIR / "crosshairs"
+# what the game shows: yaw-run passes it to KROSSHAIR as KROSSHAIR_IMG
+CURRENT = CONFIG_DIR / "current.png"
+BUILTIN = CONFIG_DIR / "plain-cross.png"
 WATCH_ENV = CONFIG_DIR / "watch.env"
 # install.sh links yaw-run here; Steam has ~/.local/bin in its PATH
 RUNNER = "css-yaw-run"
 
-CM_DIR = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "crosshair-maker"
-CM_PROJECTS = CM_DIR / "projects"
-# KROSSHAIR prefers these over current.png; if one exists, swapping current.png does nothing
-CM_SHADOWING = ("current.apng", "current.gif")
+CM_DIR = XDG_CONFIG / "crosshair-maker"
+
+# KROSSHAIR, offered as an opt-in download; pinned to the release this was tested with
+KROSSHAIR_VERSION = "0.2.5"
+KROSSHAIR_URL = ("https://github.com/noahlyk/krosshair/releases/download/"
+                 f"v{KROSSHAIR_VERSION}/krosshair-linux-x86_64.tar.gz")
+KROSSHAIR_SHA256 = "4f3c8258eb1abb6b6e4b15c55afddbba09296736473206c281e194f094617eef"
+KROSSHAIR_LAYER = "VK_LAYER_KROSSHAIR_overlay"
+# our own copy lives here; install.sh --uninstall removes both
+KROSSHAIR_DIR = XDG_DATA / "css-yaw/krosshair"
+KROSSHAIR_JSON = XDG_DATA / "vulkan/implicit_layer.d/css-yaw-krosshair.json"
 
 CS_SUBDIR = Path("steamapps/common/Counter-Strike Source/cstrike")
 CSS_APPID = "240"
@@ -63,6 +81,8 @@ VALID_KEYS = set(
 DEFAULTS = {
     "key": "q",
     "crosshair": True,
+    # "crosshair-maker", "builtin" or a path to a PNG
+    "base": "crosshair-maker",
     # index into entries of the yawspeed the game starts on
     "start": 0,
     "entries": [
@@ -99,8 +119,8 @@ def find_cstrike():
     return None
 
 
-def base_crosshair():
-    """PNG of the crosshair picked in crosshair-maker (never current.png, which we overwrite)."""
+def crosshair_maker_png():
+    """PNG of the crosshair picked in crosshair-maker, if it is installed."""
     try:
         project = json.loads((CM_DIR / "config.json").read_text())["current_crosshair"]
     except (OSError, ValueError, KeyError):
@@ -109,26 +129,108 @@ def base_crosshair():
     return png if png.is_file() else None
 
 
-def shadowing_files():
-    return [name for name in CM_SHADOWING if (CM_PROJECTS / name).exists()]
+def plain_cross():
+    """A simple 22x22 plus, for people without a crosshair of their own."""
+    if not BUILTIN.exists():
+        BUILTIN.parent.mkdir(parents=True, exist_ok=True)
+        im = Image.new("RGBA", (22, 22), (0, 0, 0, 0))
+        for i in range(1, 21):
+            for j in (10, 11):
+                im.putpixel((j, i), (255, 255, 255, 255))
+                im.putpixel((i, j), (255, 255, 255, 255))
+        im.save(BUILTIN)
+    return BUILTIN
+
+
+def resolve_base(data):
+    """The crosshair image the colours are made from. Falls back to the plain cross."""
+    base = data.get("base", "crosshair-maker")
+    if base == "crosshair-maker":
+        png = crosshair_maker_png()
+    elif base == "builtin":
+        png = None
+    else:
+        png = Path(base) if Path(base).is_file() else None
+    return png or plain_cross()
+
+
+def layer_dirs():
+    """Where the Vulkan loader looks for implicit layers."""
+    dirs = [XDG_CONFIG, Path("/etc/xdg"), Path("/etc"), XDG_DATA]
+    dirs += [Path(d) for d in os.environ.get("XDG_DATA_DIRS",
+                                             "/usr/local/share:/usr/share").split(":") if d]
+    return [d / "vulkan/implicit_layer.d" for d in dirs]
 
 
 def krosshair_installed():
-    return Path("/usr/share/vulkan/implicit_layer.d/krosshair.json").exists()
+    """Path of an installed KROSSHAIR layer manifest, or None."""
+    for folder in layer_dirs():
+        for manifest in folder.glob("*.json") if folder.is_dir() else ():
+            try:
+                if KROSSHAIR_LAYER in manifest.read_text(errors="replace"):
+                    return manifest
+            except OSError:
+                continue
+    return None
+
+
+def krosshair_crosshairs():
+    """Folder of the crosshairs that came with the user's KROSSHAIR, if any."""
+    for folder in (Path("/usr/share/krosshair/crosshairs"), KROSSHAIR_DIR / "crosshairs"):
+        if folder.is_dir():
+            return folder
+    return None
+
+
+def can_install_krosshair():
+    # upstream only publishes an x86_64 build
+    return platform.machine() == "x86_64" and not krosshair_installed()
+
+
+def install_krosshair(tarball=None):
+    """Downloads the pinned KROSSHAIR release into the user's data folder (no root).
+    `tarball` is for tests: a local copy of the release archive."""
+    if krosshair_installed():
+        raise RuntimeError("KROSSHAIR is already installed")
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "krosshair.tar.gz"
+        if tarball:
+            shutil.copyfile(tarball, archive)
+        else:
+            with urllib.request.urlopen(KROSSHAIR_URL, timeout=30) as r:
+                archive.write_bytes(r.read())
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != KROSSHAIR_SHA256:
+            raise RuntimeError("The download doesn't match the expected KROSSHAIR release")
+        with tarfile.open(archive) as tar:
+            wanted = [m for m in tar.getmembers()
+                      if m.name.lstrip("./") in ("krosshair.so", "LICENSE", "krosshair.json")
+                      or m.name.lstrip("./").startswith("crosshairs/")]
+            tar.extractall(tmp, members=wanted, filter="data")
+        src = Path(tmp)
+        manifest = json.loads((src / "krosshair.json").read_text())
+        KROSSHAIR_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src / "krosshair.so", KROSSHAIR_DIR / "krosshair.so")
+        shutil.copyfile(src / "LICENSE", KROSSHAIR_DIR / "LICENSE")
+        if (src / "crosshairs").is_dir():
+            shutil.copytree(src / "crosshairs", KROSSHAIR_DIR / "crosshairs", dirs_exist_ok=True)
+    manifest["layer"]["library_path"] = str(KROSSHAIR_DIR / "krosshair.so")
+    KROSSHAIR_JSON.parent.mkdir(parents=True, exist_ok=True)
+    write_text_atomic(KROSSHAIR_JSON, json.dumps(manifest, indent=4) + "\n")
 
 
 # ---------------------------------------------------------------- settings
 
-def load_settings(base=None):
+def load_settings():
     try:
         data = json.loads(SETTINGS.read_text())
     except (OSError, ValueError):
         data = json.loads(json.dumps(DEFAULTS))
     data.setdefault("crosshair", True)
+    data.setdefault("base", "crosshair-maker")
     data["start"] = start_index(data)
     for entry in data["entries"]:
         if not entry.get("color"):
-            entry["color"] = main_color(base) if base else "#00ff37"
+            entry["color"] = main_color(resolve_base(data))
     return data
 
 
@@ -179,18 +281,22 @@ def recolor(png, color):
     return im
 
 
-def write_crosshairs(data, base):
+def write_crosshairs(data, reset_current):
+    """One image per yawspeed. reset_current also puts the start yawspeed's image in
+    current.png; done at launch (it must exist before the game's first frame), but
+    not when applying mid-game, where it would show a different colour than the
+    game is on."""
+    base = resolve_base(data)
     CROSSHAIRS.mkdir(parents=True, exist_ok=True)
-    for old in CROSSHAIRS.glob("YAW_*.png"):
+    for old in CROSSHAIRS.glob("*.png"):
         old.unlink()
     for i, entry in enumerate(data["entries"]):
         im = recolor(base, entry["color"])
         im.save(CROSSHAIRS / f"{token(entry['speed'])}.png")
-        if i == start_index(data):
-            # shown when the watcher starts, before the game has echoed anything
-            im.save(CROSSHAIRS / "default.png")
-    # put back when the watcher stops
-    shutil.copyfile(base, CROSSHAIRS / "original.png")
+        if i == start_index(data) and (reset_current or not CURRENT.exists()):
+            tmp = CURRENT.with_name(CURRENT.name + ".tmp.png")
+            im.save(tmp)
+            tmp.replace(CURRENT)
 
 
 # ---------------------------------------------------------------- game config
@@ -245,14 +351,14 @@ def write_text_atomic(path, text):
     tmp.replace(path)
 
 
-def apply(data, cstrike, base):
+def apply(data, cstrike, reset_current=False):
     """Write yaws.cfg, crosshair images and watcher env. Returns notes for the user."""
     notes = []
     unbind = [k for k in keys_bound_to_cycle(cstrike) if k != data["key"]]
     for key in unbind:
         notes.append(f"'{key}' gets unbound next time yaws.cfg runs")
     write_text_atomic(cstrike / "cfg/yaws.cfg", yaws_cfg(data, unbind))
-    write_crosshairs(data, base)
+    write_crosshairs(data, reset_current)
     # read by yaw-run (shell), so quote the path: it has spaces
     write_text_atomic(WATCH_ENV, f"LOG={shlex.quote(str(cstrike / 'yaw.log'))}\n"
                                  f"COLORS={1 if data['crosshair'] else 0}\n")
@@ -422,12 +528,13 @@ if __name__ == "__main__":
     import sys
     if sys.argv[1:] != ["--apply"]:
         sys.exit("usage: yawcore.py --apply")
-    cstrike, base = find_cstrike(), base_crosshair()
-    if not cstrike or not base:
-        sys.exit("CS:S or the crosshair-maker crosshair not found; open the app instead")
-    settings = load_settings(base)
+    cstrike = find_cstrike()
+    if not cstrike:
+        sys.exit("CS:S not found in your Steam libraries")
+    settings = load_settings()
     problems = validate(settings)
     if problems:
         sys.exit("; ".join(problems))
-    for note in apply(settings, cstrike, base):
+    # runs right before the game starts, so the start yawspeed's colour is correct
+    for note in apply(settings, cstrike, reset_current=True):
         print(note)
