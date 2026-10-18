@@ -33,7 +33,7 @@ from pathlib import Path
 
 from PIL import Image
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 HOME = Path.home()
 XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
