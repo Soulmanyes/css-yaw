@@ -29,7 +29,7 @@ from pathlib import Path
 
 from PIL import Image
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 HOME = Path.home()
 XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
@@ -281,11 +281,16 @@ def validate(data):
 
 # ---------------------------------------------------------------- crosshair images
 
+def _pixels(im):
+    # get_flattened_data is Pillow 12+; older Pillow (most stable distros) only has getdata
+    return im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata()
+
+
 def main_color(png):
     """Most common visible colour of a crosshair, as #rrggbb."""
     im = Image.open(png).convert("RGBA")
     counts = {}
-    for r, g, b, a in im.get_flattened_data():
+    for r, g, b, a in _pixels(im):
         if a:
             counts[(r, g, b)] = counts.get((r, g, b), 0) + 1
     if not counts:
@@ -297,7 +302,7 @@ def recolor(png, color):
     """Every visible pixel becomes `color`, alpha kept. Outlines lose their own colour."""
     rgb = tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
     im = Image.open(png).convert("RGBA")
-    im.putdata([(*rgb, a) if a else (r, g, b, a) for r, g, b, a in im.get_flattened_data()])
+    im.putdata([(*rgb, a) if a else (r, g, b, a) for r, g, b, a in _pixels(im)])
     return im
 
 
