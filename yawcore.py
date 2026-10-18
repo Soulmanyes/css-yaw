@@ -225,7 +225,15 @@ def install_krosshair(tarball=None):
             wanted = [m for m in tar.getmembers()
                       if m.name.lstrip("./") in ("krosshair.so", "LICENSE", "krosshair.json")
                       or m.name.lstrip("./").startswith("crosshairs/")]
-            tar.extractall(tmp, members=wanted, filter="data")
+            try:
+                tar.extractall(tmp, members=wanted, filter="data")
+            except TypeError:
+                # Python without extraction filters (e.g. Debian 12's 3.11.2): only plain
+                # files and folders, with no absolute or ../ paths
+                for m in wanted:
+                    if not (m.isfile() or m.isdir()) or m.name.startswith("/") or ".." in m.name.split("/"):
+                        raise RuntimeError(f"Unexpected file in the KROSSHAIR archive: {m.name}")
+                tar.extractall(tmp, members=wanted)
         src = Path(tmp)
         manifest = json.loads((src / "krosshair.json").read_text())
         KROSSHAIR_DIR.mkdir(parents=True, exist_ok=True)

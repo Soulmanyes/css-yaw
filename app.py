@@ -60,6 +60,140 @@ def source_key(keyval, keycode, display):
     return None
 
 
+# ---------------------------------------------------------------- older GTK / libadwaita
+# Debian 12 and Ubuntu 22.04 (Mint 21) ship libadwaita 1.1-1.2 and GTK 4.6-4.8. The
+# newer widgets are used where they exist, with plain stand-ins otherwise.
+
+def adw_at_least(minor):
+    return (Adw.get_major_version(), Adw.get_minor_version()) >= (1, minor)
+
+
+GTK_4_10 = (Gtk.get_major_version(), Gtk.get_minor_version()) >= (4, 10)
+
+
+def toolbar_view(top_bars, content):
+    """Header bars stacked above content (Adw.ToolbarView is libadwaita 1.4+)."""
+    if adw_at_least(4):
+        view = Adw.ToolbarView()
+        for bar in top_bars:
+            view.add_top_bar(bar)
+        view.set_content(content)
+        return view
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    for bar in top_bars:
+        box.append(bar)
+    content.set_vexpand(True)
+    box.append(content)
+    return box
+
+
+class _PlainBanner(Gtk.Revealer):
+    """Stand-in for Adw.Banner (libadwaita 1.3+): a warning line under the header."""
+
+    def __init__(self):
+        super().__init__()
+        self.label = Gtk.Label(wrap=True, margin_top=8, margin_bottom=8,
+                               margin_start=12, margin_end=12)
+        self.label.add_css_class("warning")
+        self.set_child(self.label)
+
+    def set_title(self, text):
+        self.label.set_label(text)
+
+    def get_title(self):
+        return self.label.get_label()
+
+    def set_revealed(self, revealed):
+        self.set_reveal_child(revealed)
+
+
+def make_banner():
+    return Adw.Banner() if adw_at_least(3) else _PlainBanner()
+
+
+if adw_at_least(4):
+    SwitchRow = Adw.SwitchRow
+else:
+    class SwitchRow(Adw.ActionRow):
+        """Stand-in for Adw.SwitchRow (libadwaita 1.4+)."""
+        active = GObject.Property(type=bool, default=False)
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+            self.add_suffix(switch)
+            self.set_activatable_widget(switch)
+            self.bind_property("active", switch, "active",
+                               GObject.BindingFlags.BIDIRECTIONAL
+                               | GObject.BindingFlags.SYNC_CREATE)
+
+        def get_active(self):
+            return self.active
+
+        def set_active(self, value):
+            self.active = value
+
+
+if adw_at_least(5):
+    DialogBase = Adw.Dialog
+else:
+    class DialogBase(Adw.Window):
+        """Stand-in for Adw.Dialog (libadwaita 1.5+): a small modal window."""
+
+        def __init__(self, title, content_width, content_height):
+            super().__init__(title=title, default_width=content_width,
+                             default_height=content_height, modal=True)
+
+        def set_child(self, child):
+            self.set_content(child)
+
+        def present(self, parent=None):
+            if parent:
+                self.set_transient_for(parent)
+            super().present()
+
+
+def color_button():
+    if GTK_4_10:
+        return Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False))
+    button = Gtk.ColorButton()  # GTK 4.6-4.8
+    button.set_use_alpha(False)
+    return button
+
+
+def pick_png(parent, title, folder, on_path):
+    """Asks for a PNG file and calls on_path(path), or on_path(None) when cancelled."""
+    png = Gtk.FileFilter(name="PNG images")
+    png.add_mime_type("image/png")
+    if GTK_4_10:
+        dialog = Gtk.FileDialog(title=title)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(png)
+        dialog.set_filters(filters)
+        if folder:
+            dialog.set_initial_folder(Gio.File.new_for_path(str(folder)))
+
+        def done(dlg, result):
+            try:
+                on_path(dlg.open_finish(result).get_path())
+            except GLib.Error:
+                on_path(None)  # cancelled
+        dialog.open(parent, None, done)
+        return
+    chooser = Gtk.FileChooserNative(title=title, transient_for=parent,
+                                    action=Gtk.FileChooserAction.OPEN)
+    chooser.add_filter(png)
+    if folder:
+        chooser.set_current_folder(Gio.File.new_for_path(str(folder)))
+
+    def response(dlg, answer):
+        on_path(dlg.get_file().get_path() if answer == Gtk.ResponseType.ACCEPT else None)
+        parent.file_chooser = None
+    chooser.connect("response", response)
+    parent.file_chooser = chooser  # a native chooser must be kept alive while open
+    chooser.show()
+
+
 def texture_from_image(im, size):
     im = im.resize((size, size), resample=0)  # nearest: keep crosshair pixels sharp
     buf = io.BytesIO()
@@ -71,21 +205,18 @@ def hex_color(rgba):
     return "#%02x%02x%02x" % tuple(round(c * 255) for c in (rgba.red, rgba.green, rgba.blue))
 
 
-class KeyCaptureDialog(Adw.Dialog):
+class KeyCaptureDialog(DialogBase):
     """Waits for one key, mouse button or wheel turn and reports its Source name."""
 
     def __init__(self, on_key):
         super().__init__(title="Cycle key", content_width=360, content_height=220)
         self.on_key = on_key
-        view = Adw.ToolbarView()
-        view.add_top_bar(Adw.HeaderBar())
         self.label = Gtk.Label(label="Press a key, mouse button or scroll\ninside this box",
                                justify=Gtk.Justification.CENTER, vexpand=True, hexpand=True)
         area = Gtk.Frame(child=self.label, margin_start=18, margin_end=18,
                          margin_top=6, margin_bottom=18, focusable=True)
         area.add_css_class("view")
-        view.set_content(area)
-        self.set_child(view)
+        self.set_child(toolbar_view([Adw.HeaderBar()], area))
 
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.key_pressed)
@@ -107,7 +238,8 @@ class KeyCaptureDialog(Adw.Dialog):
 
     def key_pressed(self, ctrl, keyval, keycode, state):
         if keyval == Gdk.KEY_Escape:
-            return False  # let the dialog close
+            self.close()
+            return True
         self.done(source_key(keyval, keycode, ctrl.get_widget().get_display()))
         return True
 
@@ -165,8 +297,8 @@ class EntryRow(Adw.ActionRow):
         self.speed.connect("value-changed", lambda *_: window.changed())
         self.add_suffix(self.speed)
 
-        self.color = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False),
-                                           valign=Gtk.Align.CENTER)
+        self.color = color_button()
+        self.color.set_valign(Gtk.Align.CENTER)
         rgba = Gdk.RGBA()
         rgba.parse(entry["color"])
         self.color.set_rgba(rgba)
@@ -285,7 +417,6 @@ class Window(Adw.ApplicationWindow):
         self.rows = []
 
         self.toasts = Adw.ToastOverlay()
-        view = Adw.ToolbarView()
         header = Adw.HeaderBar()
         self.title_widget = Adw.WindowTitle(title="CS:S Yaw", subtitle=f"Version {core.VERSION}")
         header.set_title_widget(self.title_widget)
@@ -293,15 +424,11 @@ class Window(Adw.ApplicationWindow):
         self.apply_btn.add_css_class("suggested-action")
         self.apply_btn.connect("clicked", self.apply)
         header.pack_end(self.apply_btn)
-        view.add_top_bar(header)
-
-        self.banner = Adw.Banner()
-        view.add_top_bar(self.banner)
+        self.banner = make_banner()
 
         page = Adw.PreferencesPage()
         self.toasts.set_child(page)
-        view.set_content(self.toasts)
-        self.set_content(view)
+        self.set_content(toolbar_view([header, self.banner], self.toasts))
 
         keys = Adw.PreferencesGroup(title="Keybind")
         self.key_row = Adw.ActionRow(title="Cycle key")
@@ -325,7 +452,7 @@ class Window(Adw.ApplicationWindow):
         page.add(self.speeds)
 
         cross = Adw.PreferencesGroup(title="Crosshair")
-        self.color_row = Adw.SwitchRow(
+        self.color_row = SwitchRow(
             title="Change crosshair colour",
             subtitle="Shows a KROSSHAIR crosshair in the colour of the current yawspeed")
         self.color_row.set_active(self.data["crosshair"])
@@ -349,7 +476,7 @@ class Window(Adw.ApplicationWindow):
         page.add(cross)
 
         game = Adw.PreferencesGroup(title="Game")
-        self.autoexec_row = Adw.SwitchRow(
+        self.autoexec_row = SwitchRow(
             title="Load from autoexec.cfg",
             subtitle="Adds exec yaws.cfg to your autoexec.cfg, so the game loads your "
                      "yawspeed binds when it starts")
@@ -434,26 +561,12 @@ class Window(Adw.ApplicationWindow):
             self.set_base(value)
 
     def pick_image(self):
-        dialog = Gtk.FileDialog(title="Choose a crosshair image")
-        png = Gtk.FileFilter(name="PNG images")
-        png.add_mime_type("image/png")
-        filters = Gio.ListStore.new(Gtk.FileFilter)
-        filters.append(png)
-        dialog.set_filters(filters)
-        folder = core.krosshair_crosshairs()
-        if folder:
-            dialog.set_initial_folder(Gio.File.new_for_path(str(folder)))
-
-        def done(dlg, result):
-            try:
-                path = dlg.open_finish(result).get_path()
-            except GLib.Error:
-                path = None  # cancelled
+        def done(path):
             if path:
                 self.set_base(path)
             self.fill_base_row()
 
-        dialog.open(self, None, done)
+        pick_png(self, "Choose a crosshair image", core.krosshair_crosshairs(), done)
 
     def set_base(self, choice):
         self.base_choice = choice
@@ -620,7 +733,8 @@ class Window(Adw.ApplicationWindow):
         self.launch_row.set_subtitle(note)
 
     def copy(self, text):
-        self.get_display().get_clipboard().set(text)
+        # set_content works on every PyGObject; Clipboard.set(str) needs a newer one
+        self.get_display().get_clipboard().set_content(Gdk.ContentProvider.new_for_value(text))
         self.toasts.add_toast(Adw.Toast(title="Copied", timeout=2))
 
 

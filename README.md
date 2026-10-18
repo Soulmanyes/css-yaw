@@ -13,8 +13,13 @@ active from a sound and from your crosshair colour. Made for surf on Linux.
 
 - Linux, and the native Linux version of CS:S on Steam. Steam from your distro's packages
   works. Flatpak Steam doesn't, because `css-yaw-run` can't run inside its sandbox.
-- Python 3, GTK 4, libadwaita 1.5 or newer, PyGObject and Pillow. `install.sh` installs
-  them if they are missing.
+- Python 3, GTK 4.6 or newer, libadwaita 1.1 or newer, PyGObject and Pillow.
+  `install.sh` installs them with pacman, apt or dnf if they are missing.
+
+Tested on CachyOS (Arch), Debian 12 and Ubuntu 22.04, so newer releases of these and
+distros based on them (Mint 21 and newer, Pop!_OS, Manjaro, EndeavourOS) should work too.
+Fedora and openSUSE Tumbleweed have new enough packages but are untested. On openSUSE,
+install the dependencies yourself.
 - For the crosshair colours: KROSSHAIR. If it isn't installed, the app can install it for
   you (see below). crosshair-maker is optional.
 

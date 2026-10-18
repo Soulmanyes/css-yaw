@@ -42,8 +42,10 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw
+from gi.repository import Gtk
 import PIL
-assert (Adw.get_major_version(), Adw.get_minor_version()) >= (1, 5)
+assert (Adw.get_major_version(), Adw.get_minor_version()) >= (1, 1)
+assert (Gtk.get_major_version(), Gtk.get_minor_version()) >= (4, 6)
 PY
 }
 
@@ -58,10 +60,10 @@ if ! have_deps; then
         sudo dnf install -y python3 python3-gobject gtk4 libadwaita python3-pillow
     else
         echo "Unknown package manager. Install Python 3, PyGObject, GTK 4," >&2
-        echo "libadwaita 1.5 or newer and Pillow yourself, then run this again." >&2
+        echo "libadwaita 1.1 or newer and Pillow yourself, then run this again." >&2
         exit 1
     fi
-    have_deps || { echo "libadwaita 1.5 or newer is needed." >&2; exit 1; }
+    have_deps || { echo "GTK 4.6 and libadwaita 1.1 or newer are needed." >&2; exit 1; }
 fi
 
 # older versions ran the colour changer as an always-on systemd service;
