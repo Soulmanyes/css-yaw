@@ -10,6 +10,8 @@ yawspeed is active from a sound and from your crosshair colour. Made for surf on
 - **Crosshair colour:** your crosshair changes colour for each yawspeed. In Momentum Mod
   that's the game's own crosshair. CS:S has no crosshair without a weapon, so there it's a
   [KROSSHAIR](https://github.com/noahlyk/krosshair) crosshair.
+- **Strafe trainer** (optional): a tone while you turn without the matching strafe key, and
+  each strafe's offset in ticks on screen. See [Strafe trainer](#strafe-trainer).
 
 https://github.com/user-attachments/assets/40f99c9d-ba8a-4a52-8c9c-d5cf06575f16
 
@@ -24,6 +26,9 @@ https://github.com/user-attachments/assets/40f99c9d-ba8a-4a52-8c9c-d5cf06575f16
   `install.sh` installs them with pacman, apt or dnf if they are missing.
 - For the crosshair colours in CS:S: KROSSHAIR. If it isn't installed, the app can install
   it for you (see below). crosshair-maker is optional. Momentum Mod needs neither.
+- For the strafe trainer: a C compiler and `make` (to build its overlay), PipeWire's
+  `pw-cat` (for the tone, part of PipeWire) and a one-time `sudo` to install its input
+  service.
 
 Tested on CachyOS (Arch), Debian 12 and Ubuntu 22.04, so newer releases of these and
 distros based on them (Mint 21 and newer, Pop!_OS, Manjaro, EndeavourOS) should work too.
@@ -55,7 +60,9 @@ That's all Momentum Mod needs. For CS:S's crosshair colours, also:
    path instead.
 
 To remove the app, run `./install.sh --uninstall` and take `sourceyaw-run` out of the
-launch options. It asks whether to remove `yaws.cfg` and its `autoexec.cfg` line too.
+launch options. It asks whether to remove `yaws.cfg` and its `autoexec.cfg` line too. If you
+installed the strafe trainer's input service, remove it with
+`sudo sh inputd/install-inputd.sh remove`.
 
 If you already had a `yaws.cfg` of your own, the app saves it as `yaws.cfg.bak-sourceyaw`
 before writing its own, and uninstalling puts it back.
@@ -77,6 +84,47 @@ before writing its own, and uninstalling puts it back.
 
 If the game is already running when you press Apply, run `exec yaws` in the console.
 
+## Strafe trainer
+
+While a jump key is held, the trainer listens to your strafe keys, turn keys and mouse:
+
+- **Tone:** while you turn one way without that way's strafe key held, a constant tone plays
+  until you press the right key. Holding the other strafe key and holding none have their
+  own switches and their own pitch (the no-key tone is lower). You can pick a game sound
+  instead, which repeats while the key stays wrong.
+- **Offset:** for each strafe, the ticks between turning the other way and switching
+  strafe keys: minus is early, plus is late. Your best offset (-1 by default) shows in the
+  on-time colour. Position, size and colours are settings, and **Show in game** previews
+  them in the running game.
+
+It reads your binds from the game's `config.cfg`, following aliases, so null binds and turn
+binds (`+left`/`+right`) work as they are. Momentum Mod's tickrate is picked from the map
+(`surf_` maps 66, `bhop_` maps 100); for CS:S, set your server's tickrate.
+
+Setup:
+
+1. Install the input service once, in a terminal (the app shows the command):
+
+   ```
+   sudo sh ~/.local/share/sourceyaw/inputd/install-inputd.sh
+   ```
+
+2. Turn on **Strafe trainer** in the app and press **Apply**.
+3. Add `sourceyaw-run` before `%command%` in the game's launch options (Momentum Mod needs
+   it too for the trainer).
+
+**About the input service.** Under Wayland a game holds the pointer, so the trainer reads
+keys and mouse from `/dev/input`, which needs root. A small root service does that and
+passes on only the keys listed in `/etc/sourceyaw-inputd.conf` (by default A, D, Space, left
+Alt, L, O, P, the two main mouse buttons, mouse X and the wheel), and only to your user.
+Nothing else you type reaches the trainer or any other program. The list is root-owned so
+programs running as you can't widen it; add keys there if your binds use others (the app
+tells you which). The service starts when the trainer connects and stops 30 seconds after
+it leaves.
+
+Offsets are measured from your keyboard and mouse at the OS, not from the game's own input
+ticks, so they can differ from a server's offset display by about one tick.
+
 ## How it works
 
 - The app writes `cfg/yaws.cfg`. In it, each press sets the next `cl_yawspeed` and plays its
@@ -90,6 +138,13 @@ If the game is already running when you press Apply, run `exec yaws` in the cons
   `yaw.log` and copies the matching colour over that file on each `YAW_<speed>` line.
   KROSSHAIR reloads the file whenever it changes.
 
+- **Strafe trainer:** `sourceyaw-run` starts `trainer.py` beside the game and turns on the
+  Source Yaw overlay, a small Vulkan layer (in `overlay/`, a fork of KROSSHAIR) that draws
+  the offset. The trainer passes the number through a tiny shared file the layer reads each
+  frame, so nothing is reloaded while you play, and the layer does no work while the number
+  is hidden. In Momentum Mod, `yaws.cfg` also turns on `con_logfile yaw.log` so the trainer
+  can see which map loads.
+
 Settings and generated images are stored in `~/.config/sourceyaw`.
 
 ## Limits
@@ -101,6 +156,11 @@ Settings and generated images are stored in `~/.config/sourceyaw`.
 
 ## License
 
-[CC0 1.0](LICENSE). Public domain, do what you like. Source Yaw ships no third-party files:
-it plays sounds straight from your own game install, and KROSSHAIR is only downloaded from
-its own releases if you ask for it.
+[CC0 1.0](LICENSE). Public domain, do what you like. Source Yaw plays sounds straight from
+your own game install, and KROSSHAIR is only downloaded from its own releases if you ask for
+it.
+
+The one exception is the strafe trainer's overlay in [`overlay/`](overlay/): it is a fork
+of KROSSHAIR and stays under the [GPL-3.0](overlay/LICENSE), with the Vulkan headers it
+builds against (Apache-2.0 or MIT) and stb_image (public domain or MIT). See
+[overlay/README.md](overlay/README.md).

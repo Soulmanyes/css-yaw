@@ -33,9 +33,11 @@ from pathlib import Path
 
 from PIL import Image
 
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 
 HOME = Path.home()
+# where the app is installed (or the source checkout it runs from)
+HERE = Path(__file__).resolve().parent
 XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
 XDG_DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
 CONFIG_DIR = XDG_CONFIG / "sourceyaw"
@@ -466,6 +468,10 @@ def key_conflicts(cstrike, key):
     return found
 
 
+def trainer_on(data):
+    return bool((data.get("trainer") or {}).get("enabled"))
+
+
 def yaws_cfg(data, unbind=(), game="css"):
     entries = data["entries"]
     cvar_colors = GAMES[game]["colors"] == "cvar" and data["crosshair"]
@@ -478,6 +484,9 @@ def yaws_cfg(data, unbind=(), game="css"):
         ]
     else:
         lines += ["// play is a local-only sound cue; the yaws_colors cfgs set the crosshair colour."]
+        if trainer_on(data):
+            lines += ["// the strafe trainer reads map loads from yaw.log to pick the tickrate",
+                      "con_logfile yaw.log"]
     lines.append("")
     for i, entry in enumerate(entries):
         speed = fmt_speed(entry["speed"])
@@ -634,11 +643,13 @@ def apply(data, cstrike, reset_current=False, game="css"):
         shutil.copyfile(target, backup)
         notes.append(f"Your old yaws.cfg was saved as {backup.name}")
     write_text_atomic(target, yaws_cfg(data, unbind, game))
-    if GAMES[game]["colors"] == "krosshair":
+    krosshair = GAMES[game]["colors"] == "krosshair"
+    # read by yaw-run (shell), so quote the path: it has spaces
+    write_text_atomic(WATCH_ENV, f"LOG={shlex.quote(str(cstrike / 'yaw.log'))}\n"
+                                 f"COLORS={1 if krosshair and data['crosshair'] else 0}\n"
+                                 f"TRAINER={1 if trainer_on(data) else 0}\n")
+    if krosshair:
         write_crosshairs(data, reset_current)
-        # read by yaw-run (shell), so quote the path: it has spaces
-        write_text_atomic(WATCH_ENV, f"LOG={shlex.quote(str(cstrike / 'yaw.log'))}\n"
-                                     f"COLORS={1 if data['crosshair'] else 0}\n")
     else:
         write_color_cfgs(data, cstrike)
         if not data["crosshair"]:

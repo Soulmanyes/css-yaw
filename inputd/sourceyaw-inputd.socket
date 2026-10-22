@@ -1,0 +1,11 @@
+[Unit]
+Description=Source Yaw input service socket (strafe trainer keys)
+
+[Socket]
+ListenStream=/run/sourceyaw-inputd.sock
+SocketUser=@USER@
+SocketMode=0600
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

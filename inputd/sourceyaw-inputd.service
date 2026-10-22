@@ -1,0 +1,21 @@
+[Unit]
+Description=Source Yaw input service (forwards only the strafe trainer's keys)
+Requires=sourceyaw-inputd.socket
+
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/sourceyaw/sourceyaw-inputd.py
+# Needs to read /dev/input and nothing else.
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+DevicePolicy=closed
+DeviceAllow=char-input r
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

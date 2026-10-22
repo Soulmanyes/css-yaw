@@ -33,8 +33,13 @@ if [ "${1:-}" = "--uninstall" ]; then
     # or the Vulkan loader is left pointing at a missing library
     rm -rf "$DEST" "$APPS/$NAME.desktop" "$APPS/$APP_ID.desktop" "$ICONS/$APP_ID.svg" \
         "$BIN/$NAME" "$BIN/$NAME-run" "$BIN/$OLD_NAME-run" \
-        "${XDG_DATA_HOME:-$HOME/.local/share}/vulkan/implicit_layer.d/$NAME-krosshair.json"
+        "${XDG_DATA_HOME:-$HOME/.local/share}/vulkan/implicit_layer.d/$NAME-krosshair.json" \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/vulkan/implicit_layer.d/$NAME-overlay.json"
     say "Done. Your settings stay in ~/.config/$NAME."
+    if [ -e /etc/systemd/system/sourceyaw-inputd.socket ]; then
+        echo "The strafe trainer's input service is still installed. Remove it with:"
+        echo "    sudo sh $SRC/inputd/install-inputd.sh remove"
+    fi
     echo "Remove $NAME-run (or $OLD_NAME-run) from the launch options, or the game will not start."
     exit 0
 fi
@@ -107,7 +112,10 @@ rm -rf "$APPS/$OLD_APP_ID.desktop" "$APPS/$OLD_NAME.desktop" "$ICONS/$OLD_APP_ID
 
 say "Installing the app to $DEST"
 mkdir -p "$DEST" "$APPS" "$BIN" "$ICONS"
-install -m 644 "$SRC/yawcore.py" "$DEST/"
+install -m 644 "$SRC/yawcore.py" "$SRC/trainer.py" "$DEST/"
+# the input service's files; its installer (run with sudo) copies them to root-owned places
+mkdir -p "$DEST/inputd"
+install -m 644 "$SRC"/inputd/sourceyaw-inputd.* "$SRC/inputd/install-inputd.sh" "$DEST/inputd/"
 install -m 755 "$SRC/app.py" "$SRC/yaw-watch.sh" "$SRC/yaw-run" "$DEST/"
 cp -r "$SRC/icons" "$DEST/"
 install -m 644 "$SRC/icons/hicolor/scalable/apps/$APP_ID.svg" "$ICONS/"
@@ -129,6 +137,18 @@ Icon=$APP_ID
 Categories=Game;Utility;
 Keywords=counter-strike;css;momentum;yawspeed;crosshair;surf;
 DESKTOP
+
+# the strafe trainer's on-screen number: a small Vulkan layer, built here
+say "Building the strafe trainer overlay"
+if command -v cc >/dev/null && make -C "$SRC/overlay" >/dev/null; then
+    mkdir -p "$DEST/overlay" "$LAYERS"
+    install -m 755 "$SRC/overlay/lib/$NAME-overlay.so" "$DEST/overlay/"
+    sed "s|@LIBRARY@|$DEST/overlay/$NAME-overlay.so|" "$SRC/overlay/$NAME-overlay.json.in" \
+        > "$LAYERS/$NAME-overlay.json"
+else
+    echo "Skipped: needs a C compiler and make. The trainer still plays its sound," >&2
+    echo "but can't show the offset in game." >&2
+fi
 
 say "Writing yaws.cfg and crosshair colours from your settings"
 python3 "$DEST/yawcore.py" --apply || echo "Skipped. Open the app and press Apply."

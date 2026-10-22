@@ -14,6 +14,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import yawcore as core  # noqa: E402
+import trainer  # noqa: E402
 
 APP_ID = "io.github.soulmanyes.SourceYaw"
 
@@ -539,7 +540,8 @@ class Window(Adw.ApplicationWindow):
         page.add(cross)
         if self.uses_krosshair:
             self.add_krosshair_rows(cross)
-            self.add_steam_group(page)
+        self.add_trainer_group(page)
+        self.add_steam_group(page)
 
         self.key = self.data["key"]
         self.key_text.set_label(self.key)
@@ -570,7 +572,10 @@ class Window(Adw.ApplicationWindow):
         steam = Adw.PreferencesGroup(
             title="Steam launch options",
             description="CS:S Properties → Launch Options. sourceyaw-run applies these "
-                        "settings and runs the colour changer while the game is open.")
+                        "settings and runs the colour changer and strafe trainer while "
+                        "the game is open." if self.uses_krosshair else
+                        f"{self.info['short']} Properties → Launch Options. Only needed for "
+                        "the strafe trainer: sourceyaw-run starts it while the game is open.")
         refresh = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
                              tooltip_text="Read the launch options from Steam again")
         refresh.add_css_class("flat")
@@ -586,6 +591,227 @@ class Window(Adw.ApplicationWindow):
         steam.add(self.launch_row)
         page.add(steam)
         self.show_launch_option()
+
+    # ------------------------------------------------------------ strafe trainer
+
+    def add_trainer_group(self, page):
+        saved = self.data.get("trainer") or {}
+        cfg = {**trainer.TRAINER_DEFAULTS, **saved}
+        cfg["colors"] = {**trainer.TRAINER_DEFAULTS["colors"], **saved.get("colors", {})}
+        cfg["tickrate"] = {**trainer.TRAINER_DEFAULTS["tickrate"], **saved.get("tickrate", {})}
+        self.trainer_cfg = cfg
+        self.overlay = None
+
+        group = Adw.PreferencesGroup(
+            title="Strafe trainer",
+            description="While a jump key is held: a sound when you turn without that "
+                        "way's strafe key, and each strafe's offset on screen in ticks "
+                        "(minus: key early, plus: key late, 0: same tick).")
+        page.add(group)
+
+        self.trainer_row = SwitchRow(title="Strafe trainer")
+        self.trainer_row.set_active(cfg["enabled"])
+        self.trainer_row.connect("notify::active", lambda *_: self.trainer_changed())
+        group.add(self.trainer_row)
+
+        self.service_row = Adw.ActionRow(title="Input service")
+        copy = Gtk.Button(icon_name="edit-copy-symbolic", valign=Gtk.Align.CENTER,
+                          tooltip_text="Copy the install command")
+        copy.add_css_class("flat")
+        copy.connect("clicked", lambda *_: self.copy(self.inputd_command()))
+        self.service_copy = copy
+        self.service_row.add_suffix(copy)
+        group.add(self.service_row)
+
+        self.binds_row = Adw.ActionRow(title="Keys")
+        group.add(self.binds_row)
+
+        self.offset_row = SwitchRow(title="Show offset")
+        self.offset_row.set_active(cfg["show_offset"])
+        self.offset_row.connect("notify::active", lambda *_: self.trainer_changed())
+        group.add(self.offset_row)
+
+        position = Adw.ActionRow(title="Position",
+                                 subtitle="Centre of the number, % across and down the screen")
+        self.pos_x = self.spin(0, 100, 1, cfg["x"] * 100, "Across")
+        self.pos_y = self.spin(0, 100, 1, cfg["y"] * 100, "Down")
+        self.preview_btn = Gtk.ToggleButton(label="Show in game", valign=Gtk.Align.CENTER,
+                                            tooltip_text="Shows a sample number in the running "
+                                                         "game while you adjust it")
+        self.preview_btn.connect("toggled", lambda *_: self.preview_overlay())
+        for widget in (self.pos_x, self.pos_y, self.preview_btn):
+            position.add_suffix(widget)
+        group.add(position)
+
+        best = Adw.ActionRow(title="Best offset",
+                             subtitle="Shown in the on-time colour; lower is early, higher late")
+        self.target_spin = self.spin(-5, 5, 1, cfg["target"], "Offset in ticks")
+        best.add_suffix(self.target_spin)
+        group.add(best)
+
+        look = Adw.ActionRow(title="Size and colours",
+                             subtitle="Early, on time and late")
+        self.size_spin = self.spin(10, 120, 2, cfg["size"], "Size in pixels")
+        look.add_suffix(self.size_spin)
+        self.offset_colors = {}
+        for name, tip in (("early", "Early"), ("perfect", "On time"), ("late", "Late")):
+            button = color_button()
+            button.set_valign(Gtk.Align.CENTER)
+            button.set_tooltip_text(tip)
+            rgba = Gdk.RGBA()
+            rgba.parse(cfg["colors"][name])
+            button.set_rgba(rgba)
+            button.connect("notify::rgba", lambda *_: self.trainer_changed())
+            self.offset_colors[name] = button
+            look.add_suffix(button)
+        group.add(look)
+
+        cue = Adw.ActionRow(title="Wrong-key sound",
+                            subtitle="After this many ticks turning without the matching key. "
+                                     "The tone lasts while the key is wrong; a game sound "
+                                     "repeats every this many seconds (0: once)")
+        self.cue_ticks = self.spin(1, 20, 1, cfg["wrong_ticks"], "Ticks")
+        self.cue_repeat = self.spin(0, 1, 0.05, cfg["repeat"], "Seconds between sounds")
+        self.cue_repeat.set_digits(2)
+        self.cue_choices = [("tone", "Constant tone")] + list(self.sound_choices)
+        if cfg["sound"] not in [v for v, _ in self.cue_choices]:
+            self.cue_choices.append((cfg["sound"], cfg["sound"]))
+        self.cue_sound = Gtk.DropDown(model=Gtk.StringList.new([l for _, l in self.cue_choices]),
+                                      valign=Gtk.Align.CENTER)
+        self.cue_sound.set_size_request(SOUND_WIDTH, -1)
+        self.cue_sound.set_selected([v for v, _ in self.cue_choices].index(cfg["sound"]))
+        self.cue_sound.connect("notify::selected", lambda *_: self.trainer_changed())
+        self.tone_volume = self.spin(5, 100, 5, cfg["tone_volume"] * 100, "Tone volume, %")
+        self.tone_pitch = self.spin(60, 1000, 10, cfg["tone_pitch"], "Tone pitch in Hz "
+                                    "(other key; the no-key tone is 2/3 of it)")
+        self.cue_wrong_row = SwitchRow(title="Sound when turning with the other strafe key",
+                                       subtitle="Higher tone")
+        self.cue_wrong_row.set_active(cfg["cue_wrong_key"])
+        self.cue_wrong_row.connect("notify::active", lambda *_: self.trainer_changed())
+        self.cue_none_row = SwitchRow(title="Sound when turning with no strafe key",
+                                      subtitle="Lower tone")
+        self.cue_none_row.set_active(cfg["cue_no_key"])
+        self.cue_none_row.connect("notify::active", lambda *_: self.trainer_changed())
+        play = Gtk.Button(icon_name="media-playback-start-symbolic", valign=Gtk.Align.CENTER,
+                          tooltip_text="Play")
+        play.add_css_class("flat")
+        play.connect("clicked", lambda *_: self.play_cue())
+        for widget in (self.cue_ticks, self.cue_repeat, self.tone_pitch, self.tone_volume,
+                       self.cue_sound, play):
+            cue.add_suffix(widget)
+        group.add(cue)
+        group.add(self.cue_wrong_row)
+        group.add(self.cue_none_row)
+
+        if self.game == "momentum":
+            self.tick_spin = None
+            rates = ", ".join(f"{p}* {r}" for p, r in cfg["map_tickrates"].items())
+            group.add(Adw.ActionRow(title="Tickrate",
+                                    subtitle=f"From the map: {rates}, others "
+                                             f"{cfg['tickrate']['momentum']}"))
+        else:
+            tick = Adw.ActionRow(title="Tickrate", subtitle="The server's tickrate")
+            self.tick_spin = self.spin(16, 128, 1, cfg["tickrate"].get(self.game, 66), "Ticks per second")
+            tick.add_suffix(self.tick_spin)
+            group.add(tick)
+
+        self.trainer_rows = [self.binds_row, self.offset_row, position, best, look, cue,
+                             self.cue_wrong_row, self.cue_none_row]
+        self.show_trainer_status()
+
+    def spin(self, low, high, step, value, tip):
+        spin = Gtk.SpinButton.new_with_range(low, high, step)
+        spin.set_valign(Gtk.Align.CENTER)
+        spin.set_value(value)
+        spin.set_tooltip_text(tip)
+        spin.connect("value-changed", lambda *_: self.trainer_changed())
+        return spin
+
+    def inputd_command(self):
+        return f"sudo sh {core.HERE / 'inputd/install-inputd.sh'}"
+
+    def show_trainer_status(self):
+        on = self.trainer_row.get_active()
+        for row in self.trainer_rows:
+            row.set_sensitive(on)
+        # the tone sounds for as long as the key is wrong; game sounds repeat
+        tone = self.cue_choices[self.cue_sound.get_selected()][0] == "tone"
+        self.tone_volume.set_visible(tone)
+        self.tone_pitch.set_visible(tone)
+        self.cue_repeat.set_visible(not tone)
+        self.cue_wrong_row.set_subtitle("Higher tone" if tone else "")
+        self.cue_none_row.set_subtitle("Lower tone" if tone else "")
+        installed = trainer.forwarded() is not None
+        if installed:
+            self.service_row.set_subtitle("Installed: forwards only the keys in "
+                                          "/etc/sourceyaw-inputd.conf")
+        else:
+            self.service_row.set_subtitle(GLib.markup_escape_text(
+                "Not installed. It reads your keyboard as root and passes on only the "
+                "trainer's keys. Run in a terminal: " + self.inputd_command()))
+        self.service_copy.set_visible(not installed)
+        if self.cstrike:
+            _, unseen = trainer.read_binds(self.cstrike)
+            self.binds_row.set_subtitle(GLib.markup_escape_text(
+                "⚠ Not forwarded by the input service: " + ", ".join(unseen)
+                + ". Add them to /etc/sourceyaw-inputd.conf" if unseen
+                else "Strafe, turn and jump keys come from your binds in the game"))
+
+    def trainer_changed(self):
+        self.show_trainer_status()
+        self.changed()
+        if self.preview_btn.get_active():
+            self.preview_overlay()
+
+    def trainer_value(self):
+        cfg = dict(self.trainer_cfg)
+        cfg.update({
+            "enabled": self.trainer_row.get_active(),
+            "show_offset": self.offset_row.get_active(),
+            "x": round(self.pos_x.get_value() / 100, 3),
+            "y": round(self.pos_y.get_value() / 100, 3),
+            "size": int(self.size_spin.get_value()),
+            "colors": {k: hex_color(b.get_rgba()) for k, b in self.offset_colors.items()},
+            "sound": self.cue_choices[self.cue_sound.get_selected()][0],
+            "wrong_ticks": int(self.cue_ticks.get_value()),
+            "repeat": round(self.cue_repeat.get_value(), 2),
+            "tone_volume": round(self.tone_volume.get_value() / 100, 2),
+            "tone_pitch": int(self.tone_pitch.get_value()),
+            "cue_wrong_key": self.cue_wrong_row.get_active(),
+            "cue_no_key": self.cue_none_row.get_active(),
+            "target": int(self.target_spin.get_value()),
+        })
+        if self.tick_spin is not None:
+            cfg["tickrate"] = {**cfg["tickrate"], self.game: int(self.tick_spin.get_value())}
+        return cfg
+
+    def preview_overlay(self):
+        """Shows a sample number in a game started through sourceyaw-run."""
+        cfg = self.trainer_value()
+        if self.overlay is None:
+            self.overlay = trainer.Overlay()
+        if not self.preview_btn.get_active():
+            self.overlay.hide()
+            return
+        trainer.write_atlas(cfg)
+        target = cfg["target"]
+        self.overlay.show(f"{target:+d}" if target else "0", 1, cfg["x"], cfg["y"])
+
+    def play_cue(self):
+        sound = self.cue_choices[self.cue_sound.get_selected()][0]
+        if sound == "tone":
+            # both tones: other key held, then no key held
+            tone = trainer.Tone(self.tone_volume.get_value() / 100,
+                                self.tone_pitch.get_value())
+            tone.start()
+            tone.mode = "wrong"
+            GLib.timeout_add(350, lambda: setattr(tone, "mode", "none") or False)
+            GLib.timeout_add(700, lambda: setattr(tone, "mode", None) or False)
+            GLib.timeout_add(900, lambda: tone.close() or False)
+            return
+        if sound and not (self.cstrike and core.play_sound(self.cstrike, sound, self.game)):
+            self.toasts.add_toast(Adw.Toast(title=f"Couldn't find {sound} in your game files",
+                                            timeout=3))
 
     # ------------------------------------------------------------ state
 
@@ -735,6 +961,7 @@ class Window(Adw.ApplicationWindow):
                 "base": self.base_choice,
                 # Momentum: the user's own crosshair colour, put back when colours are off
                 "original_color": self.data.get("original_color"),
+                "trainer": self.trainer_value(),
                 "entries": [row.value() for row in self.rows]}
 
     # ------------------------------------------------------------ actions

@@ -31,12 +31,24 @@ done
 # shellcheck source=/dev/null
 . "$CFG/watch.env" 2>/dev/null
 
+HELPERS=""
 if [ "$GAME" = css ] && [ "${COLORS:-0}" = 1 ] && [ -n "${LOG:-}" ] && [ -f "$CFG/current.png" ]; then
     export KROSSHAIR=1 KROSSHAIR_IMG="$CFG/current.png"
     # started directly (not via a function) so $! is the watcher itself
     LOG="$LOG" "$DIR/yaw-watch.sh" >> "$RUNLOG" 2>&1 &
-    WATCHER=$!
-    trap 'kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null' EXIT
+    HELPERS="$HELPERS $!"
+fi
+# strafe trainer: reads keys from the input service and draws the offset through
+# the Source Yaw overlay layer, which only loads when SOURCEYAW_OVERLAY=1
+if [ "${TRAINER:-0}" = 1 ]; then
+    export SOURCEYAW_OVERLAY=1 SOURCEYAW_OVERLAY_ATLAS="$CFG/overlay/atlas.png" \
+        SOURCEYAW_OVERLAY_STATE="$CFG/overlay/state"
+    python3 "$DIR/trainer.py" "$GAME" >> "$RUNLOG" 2>&1 &
+    HELPERS="$HELPERS $!"
+fi
+if [ -n "$HELPERS" ]; then
+    # shellcheck disable=SC2086  # word splitting wanted: a list of pids
+    trap 'kill $HELPERS 2>/dev/null; wait $HELPERS 2>/dev/null' EXIT
     trap 'exit 143' TERM INT HUP
 fi
 
