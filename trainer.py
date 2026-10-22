@@ -340,7 +340,14 @@ class Trainer:
     def has(self, role, code):
         return code in self.roles[role]
 
+    # False while another window has focus or the game is in its menu (no map
+    # loaded): keys and mouse are still tracked, so nothing sticks when you come
+    # back, but nothing counts or sounds
+    focused = True
+
     def jumping(self, now):
+        if not self.focused:
+            return False
         return (any(c in self.roles["jump"] for c in self.held)
                 or ("wheel" in self.roles["jump"] and now - self.last_wheel < 0.1))
 
@@ -457,12 +464,68 @@ class Trainer:
             self.on_wrong()
 
 
+# ---------------------------------------------------------------- focus
+
+class FocusWatch:
+    """Whether the game's window has focus, asked from Hyprland every 0.25 s.
+
+    The input service sees every key and mouse movement on the desktop, so
+    without this, scrolling in a browser while the game runs in the background
+    would count as jumping. Other desktops have no common way to ask, so there
+    the game counts as focused."""
+    INTERVAL = 0.25
+
+    def __init__(self, process):
+        self.process = process
+        self.focused = True
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+        self.path = os.path.join(runtime, "hypr", sig, ".socket.sock") if runtime and sig else None
+        if self.path and os.path.exists(self.path):
+            threading.Thread(target=self._watch, daemon=True).start()
+
+    def _active_pid(self):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            s.connect(self.path)
+            s.sendall(b"j/activewindow")
+            data = b""
+            while chunk := s.recv(65536):
+                data += chunk
+        import json
+        return (json.loads(data or b"{}") or {}).get("pid")
+
+    def _watch(self):
+        while True:
+            try:
+                pid = self._active_pid()
+                with open(f"/proc/{pid}/comm") as f:
+                    self.focused = f.read().strip() == self.process
+            except (OSError, ValueError, TypeError):
+                self.focused = False
+            time.sleep(self.INTERVAL)
+
+
 # ---------------------------------------------------------------- running
 
 def connect():
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(SOCKET)
     return s
+
+
+# console lines that mean a map was entered or left; the game starts in its menu
+_MAP_IN = re.compile(r"Host_NewGame on map |^Connected to |^Map: ")
+_MAP_OUT = re.compile(r"Host_ShutdownServer|Host_Shutdown\b|^Disconnect")
+
+
+def map_state(line):
+    """True when the line means a map was entered, False when left, else None."""
+    if _MAP_IN.search(line):
+        return True
+    if _MAP_OUT.search(line):
+        return False
+    return None
 
 
 def map_tickrate(cfg, game, line):
@@ -518,11 +581,14 @@ def run(game):
             tone.mode = reason
 
     trainer = Trainer(cfg, roles, cfg["tickrate"].get(game, 66), offset, wrong, wrong_state)
+    focus = FocusWatch(yawcore.GAMES[game]["process"])
     log_path = game_dir / "yaw.log"
     log = open(log_path, errors="replace") if log_path.exists() else None
     if log:
         log.seek(0, os.SEEK_END)
     buf = b""
+    # without a console log there is no way to tell, so everything counts
+    in_map = log is None
     while True:
         ready, _, _ = select.select([sock], [], [], 0.002)
         if ready:
@@ -535,18 +601,24 @@ def run(game):
                 sec, usec, etype, code, value = EVENT.unpack_from(buf)
                 buf = buf[EVENT.size:]
                 trainer.feed(sec + usec / 1e6, etype, code, value)
+        trainer.focused = focus.focused and in_map
         trainer.check(time.time())
         if shown_until and time.monotonic() > shown_until:
             overlay.hide()
             shown_until = 0.0
         if log:
             for line in log.readlines():
+                state = map_state(line)
+                if state is not None and state != in_map:
+                    in_map = state
+                    print(f"trainer: {'in a map' if in_map else 'in the menu'}", flush=True)
                 rate = map_tickrate(cfg, game, line)
                 if rate:
                     trainer.tickrate = rate
                     print(f"trainer: {line.strip()} -> {rate} tick", flush=True)
         elif log_path.exists():
             log = open(log_path, errors="replace")
+            in_map = False  # the game just started logging: it's in its menu
 
 
 def main():

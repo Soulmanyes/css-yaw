@@ -97,6 +97,10 @@ While a jump key is held, the trainer listens to your strafe keys, turn keys and
   on-time colour. Position, size and colours are settings, and **Show in game** previews
   them in the running game.
 
+It only counts while the game's window has focus (on Hyprland; other desktops can't be
+asked, so there it always counts) and while a map is loaded, so scrolling in the main menu
+or another window stays quiet.
+
 It reads your binds from the game's `config.cfg`, following aliases, so null binds and turn
 binds (`+left`/`+right`) work as they are. Momentum Mod's tickrate is picked from the map
 (`surf_` maps 66, `bhop_` maps 100); for CS:S, set your server's tickrate.
@@ -153,6 +157,8 @@ Settings and generated images are stored in `~/.config/sourceyaw`.
   outlines lose their own colour.
 - If another config changes `cl_yawspeed` directly, the colour isn't updated until the
   next press of the cycle key.
+- The strafe trainer can't see in-game menus: with a map loaded, scrolling in the pause
+  menu or console still counts as jumping.
 
 ## License
 
