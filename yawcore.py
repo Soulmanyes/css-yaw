@@ -33,7 +33,7 @@ from pathlib import Path
 
 from PIL import Image
 
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 
 HOME = Path.home()
 # where the app is installed (or the source checkout it runs from)

@@ -528,10 +528,11 @@ def map_state(line):
 
 
 def map_tickrate(cfg, game, line):
-    m = re.search(r"on map (\S+)", line)
+    # Momentum: "Host_NewGame on map <name>"; CS:S on joining a server: "Map: <name>"
+    m = re.search(r"on map (\S+)|^Map: (\S+)", line)
     if not m:
         return None
-    name = m.group(1).lower()
+    name = (m.group(1) or m.group(2)).lower()
     for prefix, rate in cfg["map_tickrates"].items():
         if name.startswith(prefix.lower()):
             return rate

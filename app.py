@@ -706,14 +706,15 @@ class Window(Adw.ApplicationWindow):
         group.add(self.cue_wrong_row)
         group.add(self.cue_none_row)
 
+        rates = ", ".join(f"{p}* {r}" for p, r in cfg["map_tickrates"].items())
         if self.game == "momentum":
             self.tick_spin = None
-            rates = ", ".join(f"{p}* {r}" for p, r in cfg["map_tickrates"].items())
             group.add(Adw.ActionRow(title="Tickrate",
                                     subtitle=f"From the map: {rates}, others "
                                              f"{cfg['tickrate']['momentum']}"))
         else:
-            tick = Adw.ActionRow(title="Tickrate", subtitle="The server's tickrate")
+            tick = Adw.ActionRow(title="Tickrate", subtitle=f"From the map: {rates}; on other maps "
+                                                           "the server's tickrate")
             self.tick_spin = self.spin(16, 128, 1, cfg["tickrate"].get(self.game, 66), "Ticks per second")
             tick.add_suffix(self.tick_spin)
             group.add(tick)

@@ -111,8 +111,8 @@ asked, so there it always counts) and while a map is loaded, so scrolling in the
 or another window stays quiet.
 
 It reads your binds from the game's `config.cfg`, following aliases, so null binds and turn
-binds (`+left`/`+right`) work as they are. Momentum Mod's tickrate is picked from the map
-(`surf_` maps 66, `bhop_` maps 100); for CS:S, set your server's tickrate.
+binds (`+left`/`+right`) work as they are. The tickrate is picked from the map (`surf_` maps
+66, `bhop_` maps 100); on other CS:S maps it uses the tickrate you set in the app.
 
 Setup:
 
