@@ -274,7 +274,6 @@ class Tone:
     def start(self):
         if self.proc:
             threading.Thread(target=self._feed, daemon=True).start()
-        threading.Thread(target=self._feed, daemon=True).start()
 
     def _feed(self):
         start = time.monotonic()
