@@ -670,6 +670,7 @@ class Window(Adw.ApplicationWindow):
                             subtitle="After this many ticks turning without the matching key. "
                                      "The tone lasts while the key is wrong; a game sound "
                                      "repeats every this many seconds (0: once)")
+        tone = Adw.ActionRow(title="Sound", subtitle="Tone pitch and volume, or a game sound")
         self.cue_ticks = self.spin(1, 20, 1, cfg["wrong_ticks"], "Ticks")
         self.cue_repeat = self.spin(0, 1, 0.05, cfg["repeat"], "Seconds between sounds")
         self.cue_repeat.set_digits(2)
@@ -696,10 +697,12 @@ class Window(Adw.ApplicationWindow):
                           tooltip_text="Play")
         play.add_css_class("flat")
         play.connect("clicked", lambda *_: self.play_cue())
-        for widget in (self.cue_ticks, self.cue_repeat, self.tone_pitch, self.tone_volume,
-                       self.cue_sound, play):
+        for widget in (self.cue_ticks, self.cue_repeat):
             cue.add_suffix(widget)
+        for widget in (self.cue_sound, self.tone_pitch, self.tone_volume, play):
+            tone.add_suffix(widget)
         group.add(cue)
+        group.add(tone)
         group.add(self.cue_wrong_row)
         group.add(self.cue_none_row)
 
@@ -715,7 +718,7 @@ class Window(Adw.ApplicationWindow):
             tick.add_suffix(self.tick_spin)
             group.add(tick)
 
-        self.trainer_rows = [self.binds_row, self.offset_row, position, best, look, cue,
+        self.trainer_rows = [self.binds_row, self.offset_row, position, best, look, cue, tone,
                              self.cue_wrong_row, self.cue_none_row]
         self.show_trainer_status()
 
