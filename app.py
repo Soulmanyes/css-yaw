@@ -235,8 +235,8 @@ def hex_color(rgba):
 class KeyCaptureDialog(DialogBase):
     """Waits for one key, mouse button or wheel turn and reports its Source name."""
 
-    def __init__(self, on_key):
-        super().__init__(title="Cycle key", content_width=360, content_height=220)
+    def __init__(self, on_key, title="Cycle key"):
+        super().__init__(title=title, content_width=360, content_height=220)
         self.on_key = on_key
         self.label = Gtk.Label(label="Press a key, mouse button or scroll\ninside this box",
                                justify=Gtk.Justification.CENTER, vexpand=True, hexpand=True)
@@ -546,6 +546,7 @@ class Window(Adw.ApplicationWindow):
         self.key = self.data["key"]
         self.key_text.set_label(self.key)
         self.show_key_conflicts()
+        self.show_offset_key()
         for entry in self.data["entries"]:
             self.add_entry(entry=entry)
         self.rows[self.data["start"]].start.set_active(True)
@@ -630,6 +631,21 @@ class Window(Adw.ApplicationWindow):
         self.offset_row.set_active(cfg["show_offset"])
         self.offset_row.connect("notify::active", lambda *_: self.trainer_changed())
         group.add(self.offset_row)
+
+        self.offset_key = cfg["offset_key"]
+        self.offset_key_row = Adw.ActionRow(title="Offset key")
+        self.offset_key_text = Gtk.Label(valign=Gtk.Align.CENTER)
+        self.offset_key_text.add_css_class("heading")
+        self.offset_key_row.add_suffix(self.offset_key_text)
+        change = Gtk.Button(label="Change…", valign=Gtk.Align.CENTER)
+        change.connect("clicked", self.capture_offset_key)
+        self.offset_key_row.add_suffix(change)
+        self.offset_key_clear = Gtk.Button(icon_name="edit-clear-symbolic", valign=Gtk.Align.CENTER,
+                                           tooltip_text="No offset key")
+        self.offset_key_clear.add_css_class("flat")
+        self.offset_key_clear.connect("clicked", lambda *_: self.set_offset_key(""))
+        self.offset_key_row.add_suffix(self.offset_key_clear)
+        group.add(self.offset_key_row)
 
         position = Adw.ActionRow(title="Position",
                                  subtitle="Centre of the number, % across and down the screen")
@@ -719,7 +735,7 @@ class Window(Adw.ApplicationWindow):
             tick.add_suffix(self.tick_spin)
             group.add(tick)
 
-        self.trainer_rows = [self.binds_row, self.offset_row, position, best, look, cue, tone,
+        self.trainer_rows = [self.binds_row, self.offset_row, self.offset_key_row, position, best, look, cue, tone,
                              self.cue_wrong_row, self.cue_none_row]
         self.show_trainer_status()
 
@@ -772,6 +788,7 @@ class Window(Adw.ApplicationWindow):
         cfg.update({
             "enabled": self.trainer_row.get_active(),
             "show_offset": self.offset_row.get_active(),
+            "offset_key": self.offset_key,
             "x": round(self.pos_x.get_value() / 100, 3),
             "y": round(self.pos_y.get_value() / 100, 3),
             "size": int(self.size_spin.get_value()),
@@ -986,8 +1003,32 @@ class Window(Adw.ApplicationWindow):
             self.key = key
             self.key_text.set_label(key)
             self.show_key_conflicts()
+            self.show_offset_key()
             self.changed()
         KeyCaptureDialog(got).present(self)
+
+    def capture_offset_key(self, *_):
+        KeyCaptureDialog(self.set_offset_key, title="Offset key").present(self)
+
+    def set_offset_key(self, key):
+        self.offset_key = key
+        self.show_offset_key()
+        self.trainer_changed()
+
+    def show_offset_key(self):
+        key = self.offset_key
+        self.offset_key_text.set_label(key or "None")
+        self.offset_key_clear.set_visible(bool(key))
+        text = ("In game, each press shows or hides the offset; Show offset sets how it "
+                "starts. Takes effect from the next game start")
+        if key and key.lower() == self.key.lower():
+            text = f"⚠ {key} is also the cycle key, so it stays the cycle key. Pick another key"
+        elif key:
+            conflicts = core.key_conflicts(self.cstrike, key) if self.cstrike else []
+            commands = sorted({cmd for _, cmd in conflicts})
+            if commands:
+                text = f"⚠ {key} is bound to {', '.join(commands)} now. Apply replaces that"
+        self.offset_key_row.set_subtitle(GLib.markup_escape_text(text))
 
     def add_entry(self, *_, entry=None):
         if entry is None:

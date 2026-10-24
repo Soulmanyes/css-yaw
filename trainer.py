@@ -94,7 +94,8 @@ TRAINER_DEFAULTS = {
     "wrong_ticks": 3,              # ticks of wrong (or no) key before the cue
     "repeat": 0.2,                 # game sound: seconds between plays while wrong; 0 = once
     "target": -1,                  # the offset counted as best (shown green)
-    "show_offset": True,
+    "show_offset": True,           # at launch; offset_key flips it in game
+    "offset_key": "",              # key bound in yaws.cfg to show or hide the offset
     "x": 0.5, "y": 0.56,           # number's centre, as a fraction of the screen
     "size": 36,                    # font size in pixels
     "colors": {"early": "#ff5a5a", "perfect": "#5aff78", "late": "#ffc83c"},
@@ -558,10 +559,11 @@ def run(game):
         return 1
 
     shown_until = 0.0
+    showing = cfg["show_offset"]
 
     def offset(ticks):
         nonlocal shown_until
-        if not cfg["show_offset"]:
+        if not showing:
             return
         target = cfg["target"]
         row = 0 if ticks < target else 1 if ticks == target else 2
@@ -608,6 +610,12 @@ def run(game):
             shown_until = 0.0
         if log:
             for line in log.readlines():
+                if yawcore.OFFSETS_TOKEN in line:
+                    showing = not showing
+                    if not showing:
+                        overlay.hide()
+                        shown_until = 0.0
+                    print(f"trainer: offset {'shown' if showing else 'hidden'}", flush=True)
                 state = map_state(line)
                 if state is not None and state != in_map:
                     in_map = state

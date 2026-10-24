@@ -104,7 +104,8 @@ While a jump key is held, the trainer listens to your strafe keys, turn keys and
 - **Offset:** for each strafe, the ticks between turning the other way and switching
   strafe keys: minus is early, plus is late. Your best offset (-1 by default) shows in the
   on-time colour. Position, size and colours are settings, and **Show in game** previews
-  them in the running game.
+  them in the running game. An optional **Offset key** shows or hides the number in game
+  with one press.
 
 It only counts while the game's window has focus (on Hyprland; other desktops can't be
 asked, so there it always counts) and while a map is loaded, so scrolling in the main menu

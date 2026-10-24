@@ -33,7 +33,7 @@ from pathlib import Path
 
 from PIL import Image
 
-VERSION = "1.3.3"
+VERSION = "1.4.0"
 
 HOME = Path.home()
 # where the app is installed (or the source checkout it runs from)
@@ -89,6 +89,9 @@ BACKUPS = (BACKUP, ".bak-css-yaw")
 # Momentum: one small cfg per yawspeed that sets the crosshair colour (an alias
 # can't hold the quotes cl_crosshair_color "R G B A" needs, but a cfg can)
 COLOR_DIR = "yaws_colors"
+# the strafe trainer's in-game key: its alias echoes OFFSETS_TOKEN into yaw.log
+OFFSETS_ALIAS = "sourceyaw_offsets"
+OFFSETS_TOKEN = "SY_OFFSETS"
 
 # short UI sounds to offer; the app only lists the ones this game install has
 SOUNDS = ["buttons/blip1", "buttons/blip2", "buttons/button10", "buttons/button11",
@@ -435,23 +438,23 @@ def write_crosshairs(data, reset_current):
 
 # ---------------------------------------------------------------- game config
 
-def keys_bound_to_cycle(cstrike):
-    """Keys config.cfg binds to yaw_cycle. It keeps binds across launches and the
-    game rewrites it on exit, so a key that was changed away from stays bound
-    there until yaws.cfg unbinds it."""
+def keys_bound_to_cycle(cstrike, command="yaw_cycle"):
+    """Keys config.cfg binds to yaw_cycle (or `command`). It keeps binds across
+    launches and the game rewrites it on exit, so a key that was changed away
+    from stays bound there until yaws.cfg unbinds it."""
     try:
         text = (cstrike / "cfg/config.cfg").read_text(errors="replace")
     except OSError:
         return []
-    return re.findall(r'^bind "([^"]+)" "yaw_cycle"', text, re.MULTILINE)
+    return re.findall(rf'^bind "([^"]+)" "{re.escape(command)}"', text, re.MULTILINE)
 
 
 _BIND = re.compile(r'^\s*bind\s+(?:"([^"]+)"|(\S+))\s+(.*?)\s*$', re.IGNORECASE)
 
 
 def key_conflicts(cstrike, key):
-    """[(file name, command)] for binds of `key` to anything but yaw_cycle in the
-    configs that run before yaws.cfg would take the key over."""
+    """[(file name, command)] for binds of `key` to anything but Source Yaw's own
+    commands in the configs that run before yaws.cfg would take the key over."""
     found = []
     for name in ("config.cfg", "autoexec.cfg"):
         try:
@@ -463,13 +466,21 @@ def key_conflicts(cstrike, key):
             if not m or (m.group(1) or m.group(2)).lower() != key.lower():
                 continue
             command = m.group(3).strip().strip('"')
-            if command != "yaw_cycle":
+            if command not in ("yaw_cycle", OFFSETS_ALIAS):
                 found.append((name, command))
     return found
 
 
 def trainer_on(data):
     return bool((data.get("trainer") or {}).get("enabled"))
+
+
+def offsets_key_of(data):
+    """The trainer's in-game offset toggle key, or "" when there is none."""
+    key = (data.get("trainer") or {}).get("offset_key") or ""
+    if not trainer_on(data) or key.lower() == data["key"].lower():
+        return ""
+    return key
 
 
 def yaws_cfg(data, unbind=(), game="css"):
@@ -515,6 +526,14 @@ def yaws_cfg(data, unbind=(), game="css"):
     for key in unbind:
         lines.append(f'unbind "{key}"')
     lines.append(f'bind "{data["key"]}" "yaw_cycle"')
+    offsets_key = offsets_key_of(data)
+    if offsets_key:
+        lines += [
+            "",
+            "// strafe trainer: each press shows or hides the offset (the trainer reads the echo)",
+            f'alias {OFFSETS_ALIAS} "echo {OFFSETS_TOKEN}"',
+            f'bind "{offsets_key}" "{OFFSETS_ALIAS}"',
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -629,7 +648,10 @@ def apply(data, cstrike, reset_current=False, game="css"):
     """Write yaws.cfg plus the game's colour files (CS:S: crosshair images and watcher
     env; Momentum: colour cfgs). `cstrike` is the game's mod folder. Returns notes."""
     notes = []
-    unbind = [k for k in keys_bound_to_cycle(cstrike) if k != data["key"]]
+    ours = {data["key"], offsets_key_of(data)}
+    unbind = [k for k in dict.fromkeys(keys_bound_to_cycle(cstrike)
+                                       + keys_bound_to_cycle(cstrike, OFFSETS_ALIAS))
+              if k not in ours]
     for key in unbind:
         notes.append(f"'{key}' gets unbound next time yaws.cfg runs")
     target = cstrike / "cfg/yaws.cfg"
