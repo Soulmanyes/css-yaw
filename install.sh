@@ -4,6 +4,10 @@
 #   - copies the app to ~/.local/share/sourceyaw and adds a launcher
 #   - the colour changer runs from a Steam launch option (yaw-run), see the app
 # Run ./install.sh --uninstall to remove it again.
+# Without cloning the repo:
+#   curl -fsSL https://raw.githubusercontent.com/Soulmanyes/sourceyaw/main/install.sh | sh
+# The whole script is one { } block, so a download cut off midway runs nothing.
+{
 set -eu
 
 NAME=sourceyaw
@@ -19,6 +23,17 @@ ICONS=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps
 UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user   # only to remove the old service
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
+
+# run through curl | sh: the repo isn't next to the script, so fetch it and run its installer
+if [ ! -f "$SRC/yawcore.py" ]; then
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    say "Downloading Source Yaw"
+    curl -fsSL https://github.com/Soulmanyes/sourceyaw/archive/refs/heads/main.tar.gz |
+        tar -xz -C "$tmp" --strip-components=1
+    sh "$tmp/install.sh" "$@" < /dev/tty
+    exit
+fi
 
 if [ "${1:-}" = "--uninstall" ]; then
     say "Removing Source Yaw"
@@ -38,7 +53,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     say "Done. Your settings stay in ~/.config/$NAME."
     if [ -e /etc/systemd/system/sourceyaw-inputd.socket ]; then
         echo "The strafe trainer's input service is still installed. Remove it with:"
-        echo "    sudo sh $SRC/inputd/install-inputd.sh remove"
+        echo "    curl -fsSL https://raw.githubusercontent.com/Soulmanyes/sourceyaw/main/inputd/install-inputd.sh | sudo sh -s remove"
     fi
     echo "Remove $NAME-run (or $OLD_NAME-run) from the launch options, or the game will not start."
     exit 0
@@ -156,3 +171,4 @@ python3 "$DEST/yawcore.py" --apply || echo "Skipped. Open the app and press Appl
 say "Done. Open \"Source Yaw\" from your app menu, or run: $NAME"
 echo "Add this to the CS:S launch options, right before %command%:"
 echo "    $NAME-run"
+}

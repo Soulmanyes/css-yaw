@@ -1,6 +1,6 @@
 # Source Yaw
 
-*Formerly CS:S Yaw. If you had it installed, `./install.sh` moves your settings, and launch
+*Formerly CS:S Yaw. If you had it installed, the installer moves your settings, and launch
 options that still say `css-yaw-run` keep working.*
 
 Cycle `cl_yawspeed` in Counter-Strike: Source or Momentum Mod with one key, and see which
@@ -38,8 +38,10 @@ install the dependencies yourself.
 ## Install
 
 ```sh
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/Soulmanyes/sourceyaw/main/install.sh | sh
 ```
+
+Or clone the repository and run `./install.sh` from it. Run the same command again to update.
 
 Then:
 
@@ -59,10 +61,17 @@ That's all Momentum Mod needs. For CS:S's crosshair colours, also:
    If Steam can't find `sourceyaw-run` (it lives in `~/.local/bin`), the app shows the full
    path instead.
 
-To remove the app, run `./install.sh --uninstall` and take `sourceyaw-run` out of the
-launch options. It asks whether to remove `yaws.cfg` and its `autoexec.cfg` line too. If you
-installed the strafe trainer's input service, remove it with
-`sudo sh inputd/install-inputd.sh remove`.
+To remove the app, run the install command with `--uninstall` and take `sourceyaw-run` out of
+the launch options:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Soulmanyes/sourceyaw/main/install.sh | sh -s -- --uninstall
+# or, from a clone:
+./install.sh --uninstall
+```
+
+It asks whether to remove `yaws.cfg` and its `autoexec.cfg` line too. If you installed the strafe
+trainer's input service, the uninstall prints the command that removes it.
 
 If you already had a `yaws.cfg` of your own, the app saves it as `yaws.cfg.bak-sourceyaw`
 before writing its own, and uninstalling puts it back.
